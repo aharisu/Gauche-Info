@@ -62,6 +62,17 @@
   (format #t "name: ~S\n" (slot-ref unit 'name))
   (format #t "description: ~S\n" (slot-ref unit 'description)))
 
+;;ユニットのapi情報を標準出力に出力する
+(define-method show-api ((unit <unit-top>))
+  (format #t "API are\n")
+  (format #t "  type        : ~a\n" (ref unit 'type))
+  (format #t "  name        : ~a\n" (ref unit 'name))
+  (unless (null? (ref unit 'description))
+    (format #t "  description : ~a\n" (string-join (ref unit 'description) "\n                ")))
+  )
+
+
+
 
 ;;unit-bottomクラスのためのメタクラス
 ;;全てのユニットクラスの下位クラスとして扱えるようにする
@@ -135,9 +146,64 @@
   (format #t "param: ~S\n" (slot-ref unit 'param))
   (format #t "return: ~S\n" (slot-ref unit 'return)))
 
+(define-method show-api ((unit <unit-proc>))
+  (next-method)
+  (unless (null? (ref unit 'param))
+    (begin
+      (format #t "  param       : ~a\n" (fold-right
+                                          (lambda (p acc) (string-append (car p) " " acc))
+                                          ""
+                                          (slot-ref unit 'param)))
+      (for-each
+        (lambda (p) 
+          (unless (null? (cdr p))
+            (format #t "- param#~a : ~a\n" (car p) (string-join (cdr p) " "))))
+        (slot-ref unit 'param))))
+  (unless (null? (ref unit 'return))
+    (format #t "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
+  )
 
 ;;varやconstantタイプ用のunit
 (define-class <unit-var> (<unit-top>) () )
+
+
+;;classタイプ用のunit
+(define-class <unit-class> (<unit-top>)
+  (
+   (supers :init-value '())
+   (slots :init-value '())
+   )
+  )
+
+(define-method commit ((unit <unit-class>) original)
+  (next-method)
+  (slot-set! unit 'supers (slot-ref original 'supers))
+  (slot-set! unit 'slots (map
+                           (lambda (s) (list (car s) (cadr s) (reverse (caddr s))))
+                           (slot-ref original 'slots)))
+  unit)
+
+(unit-bottom-initializer-add!
+  (lambda (unit initargs)
+    (slot-set! unit 'supers '())
+    (slot-set! unit 'slots '())))
+
+(define-method show ((unit <unit-class>))
+  (next-method)
+  (format #t "supers: ~S\n" (slot-ref unit 'supers))
+  (format #t "slots: ~S\n" (slot-ref unit 'slots)))
+
+(define-method show-api ((unit <unit-class>))
+  (next-method)
+  (unless (null? (slot-ref unit 'supers))
+    (format #t "  supers      : ~a\n" (string-join (ref unit 'supers) " ")))
+  (for-each
+    (lambda (s)
+      (format #t "  slot        : ~a\n" (string-append (car s) " " (cadr s)))
+      (unless (null? (caddr s))
+        (format #t "    ~a\n" (string-join (caddr s) "\n    "))))
+    (slot-ref unit 'slots))
+  )
 
 
 ;;unit-bottomからtypeにあったunitクラスに変換する
@@ -147,6 +213,7 @@
   (commit (cond
             [(or-equal? type type-fn type-method) (make <unit-proc> unit)]
             [(or-equal? type type-var type-const type-parameter) (make <unit-var> unit)]
+            [(or-equal? type type-class) (make <unit-class> unit)]
             [else (raise (condition (<geninfo-warning> (message "unkown document unit type"))))]) ;TODO warning
           unit))
 
@@ -188,11 +255,19 @@
 ;;parse document
 ;-------***************-----------
 (define (x->writable-string x)
-  (cond
-    [(string? x) (string-append "\"" x "\"")]
-    ;[(symbol? x) (string-append "'" (symbol->string x))]
-    [(keyword? x) (string-append ":" (keyword->string x))]
-    [else (x->string x)]))
+  (match x
+         [(? string? x) (string-append "\"" x "\"")]
+         ;[(symbol? x) (string-append "'" (symbol->string x))]
+         [(? keyword? x) (string-append ":" (keyword->string x))]
+         [('quote x) (string-append "'" (x->writable-string x))]
+         [(? list? x) (string-append "(" 
+                                     (string-trim-right
+                                       (fold-right
+                                         (lambda (x acc) (string-append (x->writable-string x) " " acc))
+                                         ""
+                                         x))
+                                     ")")]
+         [x (x->string x)]))
 
 (define tags '())
 
@@ -218,6 +293,8 @@
     [(assoc-ref tags (x->string tag)) => cdddr]
     [else #f]))
 
+(define (tag-allow-multiple-ret-true unit) #t)
+
 (define (tag-init first-line unit) first-line)
 
 (define (tag-valid-ret-true text unit) #t)
@@ -226,28 +303,29 @@
   (lambda (text unit)
     (slot-update! unit tag (lambda (value) (cons text value)))))
 
+(define (split-first-token line)
+  (let* ([port (open-input-string line)]
+         [first (read port)])
+    (if (eof-object? first)
+      #f
+      (append (match first
+                     [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
+                     [sym (list (x->writable-string sym) (x->writable-string sym))])
+              (cons (string-trim (port->string port)) '())))))
+
 ;;define @description tag
 (define-tag description
-            (lambda (unit) #t)
+            tag-allow-multiple-ret-true
             tag-init
             tag-valid-ret-true
             (tag-append-text 'description))
 
 ;;define @param tag
 (define-tag param
-            (lambda (unit) #t)
+            tag-allow-multiple-ret-true
             (lambda (first-line unit)
-              (define (split-first-token)
-                (let* ([port (open-input-string first-line)]
-                       [first (read port)])
-                  (if (eof-object? first)
-                    #f
-                    (append (match first
-                                   [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
-                                   [sym (list (x->writable-string sym) (x->writable-string sym))])
-                            (cons (string-trim (port->string port)) '())))))
               (cond
-                [(split-first-token) 
+                [(split-first-token first-line) 
                  => (lambda (tokens)
                       (slot-update! unit 'param (lambda (v)
                                                   (cons (list (car tokens) (cadr tokens)) v)))
@@ -267,6 +345,25 @@
             tag-valid-ret-true
             (tag-append-text 'return))
 
+
+;;define @slot tag
+(define-tag slot
+            tag-allow-multiple-ret-true
+            (lambda (first-line unit)
+              (cond
+                [(split-first-token first-line)
+                 => (lambda (tokens)
+                      (slot-update! unit 'slots (lambda (v) (cons (list (car tokens) "" '()) v)))
+                      (caddr tokens))]
+                [else (raise (condition (<geninfo-warning> (message "slot name is required"))))]))
+            tag-valid-ret-true
+            (lambda (text unit)
+              (slot-update! unit 'slots
+                            (lambda (v)
+                              (set-car! (cddr (car v)) (cons text (caddr (car v))))
+                              v))))
+
+
 ;;define @name tag
 (define-tag name
             (lambda (unit) (not (slot-ref unit 'name)))
@@ -281,13 +378,16 @@
 (define-constant type-const "Constant")
 ;Parameterは自動解析無理なので指定したいのなら自分で書いてね
 (define-constant type-parameter "Parameter")
-(define-constant allow-types `(
-                               ,type-fn
-                               ,type-var
-                               ,type-method
-                               ,type-const
-                               ,type-parameter
-                               ))
+(define-constant type-class "Class")
+(define-constant allow-types 
+                 `(
+                   ,type-fn
+                   ,type-var
+                   ,type-method
+                   ,type-const
+                   ,type-parameter
+                   ,type-class
+                   ))
 (define-tag type
             (lambda (unit) (not (slot-ref unit 'type)))
             tag-init
@@ -472,14 +572,41 @@
                 (lambda (var)(string->symbol (car (string-split (symbol->string var) "::"))))
                 unit))
 
+;;defime-classの解析を行う
+(define (analyze-class-define l unit)
+  (set-unit-name (symbol->string (cadr l)) unit)
+  (set-unit-type type-class unit)
+  (slot-set! unit 'supers (map x->string (caddr l)))
+  (let ([org-slots (slot-ref unit 'slots)]
+        [gen-slots (map 
+                     (lambda (s)
+                       (list (symbol->string (car s))
+                             (string-trim-right (fold-right
+                                                  (lambda (x acc) (string-append (x->writable-string x) " " acc))
+                                                  ""
+                                                  (cdr s)))
+                             '()))
+                     (cadddr l))])
+    (for-each
+      (lambda (s)
+        (cond
+          [(assoc (car s) gen-slots)
+           => (lambda (slot) (set-car! (cddr slot) (caddr s)))]
+          [else (format #t "warning.")]))
+      org-slots)
+    (slot-set! unit 'slots gen-slots)))
+
+
 
 ;;解析可能な式のリスト
-(define-constant analyzable-symbols `(
-  (define . ,analyze-normal-define)
-  (define-constant . ,analyze-normal-define)
-  (define-cproc . ,analyze-stub-proc-define)
-  (define-method . ,analyze-method-define)
-  ))
+(define-constant analyzable-symbols 
+                 `(
+                   (define . ,analyze-normal-define)
+                   (define-constant . ,analyze-normal-define)
+                   (define-cproc . ,analyze-stub-proc-define)
+                   (define-method . ,analyze-method-define)
+                   (define-class . ,analyze-class-define)
+                   ))
 
 ;;解析可能な式か?
 (define (analyzable? exp)
@@ -588,28 +715,6 @@
      => (lambda (m) (find-unit (x->string symbol) (geninfo-from-module (module-name m) #f)))]
     [else #f]))
 
-;;ユニットのapi情報を標準出力に出力する
-(define (show-unit-api unit)
-  (format #t "API are\n")
-  (format #t "  type        : ~a\n" (ref unit 'type))
-  (format #t "  name        : ~a\n" (ref unit 'name))
-  (unless (null? (ref unit 'param))
-    (format #t "  param       : ~a\n" (fold-right
-                                        (lambda (p acc) (string-append (car p) " " acc))
-                                        ""
-                                        (slot-ref unit 'param))))
-  (unless (null? (ref unit 'return))
-    (format #t "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
-  (unless (null? (ref unit 'description))
-    (format #t "  description : ~a\n" (string-join (ref unit 'description) "\n                ")))
-
-  (unless (null? (slot-ref unit 'param))
-    (for-each
-      (lambda (p) 
-        (unless (null? (cdr p))
-          (format #t "- param#~a : ~a\n" (car p) (string-join (cdr p) " "))))
-      (slot-ref unit 'param)))
-  )
 
 ;;;;;
 ;;symbolのドキュメントユニットを探し、api情報を出力する
@@ -619,7 +724,7 @@
            ;;TODO もうちょっとましな警告表示
            [(<geninfo-warning> e) (format #t "~s\n" (slot-ref e 'message))])
          (cond
-           [(find-doc-unit (x->string symbol) (if (undefined? from) #f from)) => show-unit]
-           [(find-doc-unit-in-modules symbol) => show-unit]
+           [(find-doc-unit (x->string symbol) (if (undefined? from) #f from)) => show-api]
+           [(find-doc-unit-in-modules symbol) => show-api]
            [else #f])))
 
