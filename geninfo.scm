@@ -223,18 +223,18 @@
 (define (get-tag unit) (slot-ref unit 'cur-tag))
 (define (set-tag tag unit) (slot-set! unit 'cur-tag tag))
 
-(define (set-unit-name name unit)
-  (if (and ((get-allow-multiple "name") unit) ((get-valid "name") name unit))
+(define (set-unit-name name config unit)
+  (if (and ((get-allow-multiple "name") config unit) ((get-valid "name") name config unit))
     (slot-set! unit 'name name))
   unit)
 
-(define (set-unit-type type unit)
-  (if (and ((get-allow-multiple "type") unit) ((get-valid "type") type unit))
+(define (set-unit-type type config unit)
+  (if (and ((get-allow-multiple "type") config unit) ((get-valid "type") type config unit))
     (slot-set! unit 'type type))
   unit)
 
-(define (append-text text unit)
-  ((get-appender (get-tag unit)) text unit)
+(define (append-text text config unit)
+  ((get-appender (get-tag unit)) text config unit)
   unit)
 
 (define (valid-unit? unit)
@@ -246,10 +246,11 @@
                  (if (slot-ref unit 'type) "" " [no specification of a type]")))
 
 (define (commit-unit config unit)
-  (if (valid-unit? unit)
-    (spcify-unit (slot-ref unit 'type) unit)
-    (raise (condition
-             (<geninfo-warning> (message (get-invalid-unit-reason unit)))))))
+  (cond
+    [(and (slot-ref unit 'type) (equal? (slot-ref unit 'type) type-cmd)) #f]
+    [(valid-unit? unit) (spcify-unit (slot-ref unit 'type) unit)]
+    [else (raise (condition
+             (<geninfo-warning> (message (get-invalid-unit-reason unit)))))]))
 
 
 ;-------***************-----------
@@ -294,14 +295,14 @@
     [(assoc-ref tags (x->string tag)) => cdddr]
     [else #f]))
 
-(define (tag-allow-multiple-ret-true unit) #t)
+(define (tag-allow-multiple-ret-true config unit) #t)
 
-(define (tag-init first-line unit) first-line)
+(define (tag-init first-line config unit) first-line)
 
-(define (tag-valid-ret-true text unit) #t)
+(define (tag-valid-ret-true text config unit) #t)
 
 (define (tag-append-text tag) 
-  (lambda (text unit)
+  (lambda (text config unit)
     (slot-update! unit tag (lambda (value) (cons text value)))))
 
 (define (split-first-token line)
@@ -324,7 +325,7 @@
 ;;define @param tag
 (define-tag param
             tag-allow-multiple-ret-true
-            (lambda (first-line unit)
+            (lambda (first-line config unit)
               (cond
                 [(split-first-token first-line) 
                  => (lambda (tokens)
@@ -333,7 +334,7 @@
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "param name is required"))))]))
             tag-valid-ret-true
-            (lambda (text unit)
+            (lambda (text config unit)
               (slot-update! unit 'param 
                             (lambda (value)
                               (set-cdr! (cdar value) (cons text (cddar value)))
@@ -341,7 +342,7 @@
 
 ;;define @return tag
 (define-tag return
-            (lambda (unit) (null? (slot-ref unit 'return)))
+            (lambda (config unit) (null? (slot-ref unit 'return)))
             tag-init
             tag-valid-ret-true
             (tag-append-text 'return))
@@ -350,7 +351,7 @@
 ;;define @slot tag
 (define-tag slot
             tag-allow-multiple-ret-true
-            (lambda (first-line unit)
+            (lambda (first-line config unit)
               (cond
                 [(split-first-token first-line)
                  => (lambda (tokens)
@@ -358,7 +359,7 @@
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "slot name is required"))))]))
             tag-valid-ret-true
-            (lambda (text unit)
+            (lambda (text config unit)
               (slot-update! unit 'slots
                             (lambda (v)
                               (set-car! (cddr (car v)) (cons text (caddr (car v))))
@@ -367,10 +368,11 @@
 
 ;;define @name tag
 (define-tag name
-            (lambda (unit) (not (slot-ref unit 'name)))
+            (lambda (config unit) (not (slot-ref unit 'name)))
             tag-init
-            (lambda (text unit) (not (slot-ref unit 'name)))
-            (lambda (text unit) (slot-set! unit 'name text)))
+            (lambda (text config unit) (not (slot-ref unit 'name)))
+            (lambda (text config unit) (slot-set! unit 'name text)))
+
 
 ;;define @type tag
 (define-constant type-fn "Function")
@@ -380,6 +382,11 @@
 ;Parameterは自動解析無理なので指定したいのなら自分で書いてね
 (define-constant type-parameter "Parameter")
 (define-constant type-class "Class")
+
+;;cmdをtypeに手動設定するとそのユニットはドキュメントに追加されない
+;;@@で始まるタグのみのユニットなどに設定する
+(define-constant type-cmd "cmd")
+
 (define-constant allow-types 
                  `(
                    ,type-fn
@@ -388,14 +395,34 @@
                    ,type-const
                    ,type-parameter
                    ,type-class
+                   ,type-cmd
                    ))
 (define-tag type
-            (lambda (unit) (not (slot-ref unit 'type)))
+            (lambda (config unit) (not (slot-ref unit 'type)))
             tag-init
-            (lambda (text unit) 
+            (lambda (text config unit) 
               (and (not (slot-ref unit 'type))
                    (find (lambda (x) (string=? text x)) allow-types)))
-            (lambda (text unit) (slot-set! unit 'type text)))
+            (lambda (text config unit) (slot-set! unit 'type text)))
+
+
+;;------------
+;;@@で始まるタグはドキュメント解析動作にかかわるプロパティ設定を行うためのタグ
+;;------------
+
+;;define @@parse-relative tag
+;;@@parse-relative #fに設定すると関連定義式の自動解析が行われない
+;;default: #t
+(define-tag @parse-relative
+            tag-allow-multiple-ret-true
+            (lambda (first-line config unit)
+              (let ([parse? (read (open-input-string first-line))])
+                (if (or (eof-object? parse?) (not (boolean? parse?)))
+                  (raise (condition (<geninfo-warning> (message "@parse-relative tag value selection is #t or #f"))))
+                  (set-config config 'skip-relative (not parse?)))
+                ""))
+            tag-valid-ret-true
+            (lambda (text config unit) (undefined)))
 
 
 ;;次の有効なドキュメントテキストを取得する
@@ -435,27 +462,27 @@
           (skip-current-tag)))))) ; read next line
 
 ;;テキスト内にタグがあれば処理を行う
-(define (process-tag text unit)
+(define (process-tag text config unit)
   (if (eq? #\@ (string-ref text 0))
     (let-values ([(tag text) (split-tag-and-text text)])
                 (cond 
                   [(get-allow-multiple tag) 
                    => (lambda (pred) 
-                        (if (pred unit)
+                        (if (pred config unit)
                           (begin
                             (set-tag (string->symbol tag) unit)
-                            ((get-init tag) text unit))
+                            ((get-init tag) text config unit))
                           #f))]
                   [else (raise (condition
                                  (<geninfo-warning> (message #`"unkwon tag name [,tag]."))))]))
     text))
 
 ;;テキストを現在のタグ内に追加する
-(define (process-text text unit)
+(define (process-text text config unit)
   (if (not (string-null? text))
-    (if ((get-valid (get-tag unit)) text unit)
-      (append-text text unit)
-      (format #t "warning: invalid document text [\"~s\"]." text)
+    (if ((get-valid (get-tag unit)) text config unit)
+      (append-text text config unit)
+      (format #t "warning: invalid document text [\"~s\"].\n" text)
       ))
   unit)
 
@@ -465,8 +492,8 @@
     [(next-doc-text)
      => (lambda (text) 
           (parse-doc config (cond 
-                              [(process-tag text unit)
-                               => (lambda (text) (process-text text unit))]
+                              [(process-tag text config unit)
+                               => (lambda (text) (process-text text config unit))]
                               ;;TODO Warning
                               [else (skip-current-tag) unit])))];skip tag text
     [else unit]))
@@ -477,43 +504,43 @@
 ;-------***************-----------
 
 ;;仮引数部をマッチングしながら再帰的に解析する
-(define (parse-each-arg args func-get-var)
+(define (parse-each-arg args func-get-var config)
   (let ([unit (make <unit-proc>)]
         [init (get-init 'param)])
     (let loop ([args args])
       (match args
              [(:optional spec ...) 
-              (init ":optional" unit)
+              (init ":optional" config unit)
               (loop spec)]
              [(:key spec ...) 
-              (init ":key" unit)
+              (init ":key" config unit)
               (loop spec)]
              [(:allow-other-keys spec ...)
-              (init ":allow-other-keys" unit)
+              (init ":allow-other-keys" config unit)
               (loop spec)]
              [(:rest var spec ...)
-              (init ":rest" unit)
-              (init (symbol->string (func-get-var var)) unit)
+              (init ":rest" config unit)
+              (init (symbol->string (func-get-var var)) config unit)
               (loop spec)]
              [(((keyword var) init-exp) spec ...) 
               (init 
                 #`"((,(x->writable-string keyword) ,(x->writable-string (func-get-var var))) ,(x->writable-string init-exp))"
-                unit)
+                config unit)
               (loop spec)]
              [((var init-exp) spec ...) 
-              (init #`"(,(symbol->string (func-get-var var)) ,(x->writable-string init-exp))" unit)
+              (init #`"(,(symbol->string (func-get-var var)) ,(x->writable-string init-exp))" config unit)
               (loop spec)]
              [(var args ...) 
-              (init (symbol->string (func-get-var var)) unit)
+              (init (symbol->string (func-get-var var)) config unit)
               (loop args)]
              [() (slot-ref unit 'param)]))))
 
 
 ;;lambda式の仮引数部を解析する
 ;;さらに手書きparamのドキュメントとマージする
-(define (analyze-args args func-get-var unit)
+(define (analyze-args args func-get-var config unit)
   (let ([org-param (slot-ref unit 'param)]
-        [gen-param (parse-each-arg args func-get-var)])
+        [gen-param (parse-each-arg args func-get-var config)])
     (for-each
       (lambda (p) 
         (cond
@@ -529,26 +556,26 @@
   (let ([constant? (eq? (car l) 'define-constant)])
     (match l
            [(_ (symbol args ...) _ ...) ;; lambda -> function
-            (set-unit-name (symbol->string symbol) unit)
-            (set-unit-type type-fn unit) 
-            (analyze-args args e->e unit)]
+            (set-unit-name (symbol->string symbol) config unit)
+            (set-unit-type type-fn config unit) 
+            (analyze-args args e->e config unit)]
 
            [(_ symbol exp) 
-            (set-unit-name (symbol->string symbol) unit)
+            (set-unit-name (symbol->string symbol) config unit)
             (match exp
                    [(or ('lambda (args ...) _ ...) ;; lambda -> function
                         ('^ (args ...) _ ...))
-                    (set-unit-type type-fn unit)
-                    (analyze-args args e->e unit)]
+                    (set-unit-type type-fn config unit)
+                    (analyze-args args e->e config unit)]
                    [(or ('lambda arg _ ...) ;; lambda -> function
                         ('^ arg _ ...))
-                    (set-unit-type type-fn unit)
-                    (analyze-args (list :rest arg) e->e unit)]
-                   [else (set-unit-type (if constant? type-const type-var) unit)])];; other -> var or constant
+                    (set-unit-type type-fn config unit)
+                    (analyze-args (list :rest arg) e->e config unit)]
+                   [else (set-unit-type (if constant? type-const type-var) config unit)])];; other -> var or constant
 
            [(_ symbol) ;; other -> var or constant
-            (set-unit-name (symbol->string symbol) unit)
-            (set-unit-type (if constant? type-const type-var) unit)]
+            (set-unit-name (symbol->string symbol) config unit)
+            (set-unit-type (if constant? type-const type-var) config unit)]
 
            [(_) #f])))
 
@@ -557,21 +584,21 @@
 (define (analyze-method-define l config unit)
   (if (null? (cdr l))
     #f);TODO warning
-  (set-unit-name (symbol->string (cadr l)) unit)
-  (set-unit-type type-method unit)
+  (set-unit-name (symbol->string (cadr l)) config unit)
+  (set-unit-type type-method config unit)
   (if (null? (caddr l))
     #f);TODO warning
-  (analyze-args (caddr l) e->e unit))
+  (analyze-args (caddr l) e->e config unit))
 
 
 ;;stub用 define-cprocの解析を行う
 ;;TODO エラー処理
 (define (analyze-stub-proc-define l config unit)
-  (set-unit-name (symbol->string (cadr l)) unit)
-  (set-unit-type type-fn unit)
+  (set-unit-name (symbol->string (cadr l)) config unit)
+  (set-unit-type type-fn config unit)
   (analyze-args (caddr l) 
                 (lambda (var)(string->symbol (car (string-split (symbol->string var) "::"))))
-                unit))
+                config unit))
 
 ;;クラスのslot定義部分を解析
 ;;さらに手書きのslotドキュメントとマージする
@@ -595,8 +622,8 @@
 
 ;;defime-classの解析を行う
 (define (analyze-class-define l config unit)
-  (set-unit-name (symbol->string (cadr l)) unit)
-  (set-unit-type type-class unit)
+  (set-unit-name (symbol->string (cadr l)) config unit)
+  (set-unit-type type-class config unit)
   (slot-set! unit 'supers (map x->string (caddr l)))
   (slot-set! unit 'slots (analyze-slots (cadddr l)
                                         (lambda (s)
@@ -617,8 +644,8 @@
                                    (values (car e) (cadr e))
                                    (loop (cdr e))))]
                [(classes) (get-config config 'stub-class)])
-    (set-unit-name (symbol->string (cadr l)) unit)
-    (set-unit-type type-class unit)
+    (set-unit-name (symbol->string (cadr l)) config unit)
+    (set-unit-type type-class config unit)
     (slot-set! unit 'supers (map
                               (lambda (x)
                                 (cond
@@ -652,15 +679,16 @@
 ;;ドキュメントの直下にある式が定義であれば
 ;;ドキュメントと関連するものとして解析を行う
 (define (parse-related-define config unit)
-  (let* ([org-fp (port-seek (current-input-port) 0 SEEK_CUR)]
-         [exp (read)])
-    ;;seek to origin point file pointer
-    (port-seek (current-input-port) 
-               (- org-fp (port-seek (current-input-port) 0 SEEK_CUR))
-               SEEK_CUR)
-    (if (analyzable? exp)
-      ((assq-ref  analyzable-symbols (car exp)) exp config unit))
-    unit))
+  (unless (get-config config 'skip-relative) 
+    (let* ([org-fp (port-seek (current-input-port) 0 SEEK_CUR)]
+           [exp (read)])
+      ;;seek to origin point file pointer
+      (port-seek (current-input-port) 
+                 (- org-fp (port-seek (current-input-port) 0 SEEK_CUR))
+                 SEEK_CUR)
+      (if (analyzable? exp)
+        ((assq-ref  analyzable-symbols (car exp)) exp config unit))))
+  unit)
 
 ;;解析しようとしているファイルが.stubであれば事前解析を行う
 ;;Cレベルのクラス名とGaucheレベルのクラス名の対応を取っておく
@@ -713,10 +741,11 @@
           (lambda (line)
             (when (doc-start-line? line)
               (port-seek (current-input-port) (- (string-size line)) SEEK_CUR)
-              (show (add-unit doc config
-                              (commit-unit config
-                                           (parse-related-define config 
-                                                                 (parse-doc config (make <unit-bottom>))))))))
+              (cond
+                [(commit-unit config
+                              (parse-related-define config 
+                                                    (parse-doc config (make <unit-bottom>))))
+                 => (lambda (unit) (show (add-unit doc config unit)))])))
           read-line)))
     (commit-doc doc)))
 
