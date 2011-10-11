@@ -22,6 +22,12 @@
 ;;解析中に遭遇した例外を表すコンディションタイプ
 (define-condition-type <geninfo-warning> <message-condition> #f)
 
+;;documentやunitを出力するためのトップクラス
+(define-class <out-context> ()
+  (
+   (port :init-keyword :port)
+   ))
+
 
 ;;一つのドキュメントを表すクラス
 (define-class <doc> ()
@@ -57,22 +63,10 @@
   (slot-set! unit 'description (reverse (slot-ref original 'description)))
   unit)
 
-
 (define-method show ((unit <unit-top>))
   (format #t "type: ~S\n" (slot-ref unit 'type))
   (format #t "name: ~S\n" (slot-ref unit 'name))
   (format #t "description: ~S\n" (slot-ref unit 'description)))
-
-;;ユニットのapi情報を標準出力に出力する
-(define-method show-api ((unit <unit-top>))
-  (format #t "API are\n")
-  (format #t "  type        : ~a\n" (ref unit 'type))
-  (format #t "  name        : ~a\n" (ref unit 'name))
-  (unless (null? (ref unit 'description))
-    (format #t "  description : ~a\n" (string-join (ref unit 'description) "\n                ")))
-  )
-
-
 
 
 ;;unit-bottomクラスのためのメタクラス
@@ -147,22 +141,6 @@
   (format #t "param: ~S\n" (slot-ref unit 'param))
   (format #t "return: ~S\n" (slot-ref unit 'return)))
 
-(define-method show-api ((unit <unit-proc>))
-  (next-method)
-  (unless (null? (ref unit 'param))
-    (begin
-      (format #t "  param       : ~a\n" (fold-right
-                                          (lambda (p acc) (string-append (car p) " " acc))
-                                          ""
-                                          (slot-ref unit 'param)))
-      (for-each
-        (lambda (p) 
-          (unless (null? (cdr p))
-            (format #t "- param#~a : ~a\n" (car p) (string-join (cdr p) " "))))
-        (slot-ref unit 'param))))
-  (unless (null? (ref unit 'return))
-    (format #t "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
-  )
 
 ;;varやconstantタイプ用のunit
 (define-class <unit-var> (<unit-top>) () )
@@ -194,17 +172,6 @@
   (format #t "supers: ~S\n" (slot-ref unit 'supers))
   (format #t "slots: ~S\n" (slot-ref unit 'slots)))
 
-(define-method show-api ((unit <unit-class>))
-  (next-method)
-  (unless (null? (slot-ref unit 'supers))
-    (format #t "  supers      : ~a\n" (string-join (ref unit 'supers) " ")))
-  (for-each
-    (lambda (s)
-      (format #t "  slot        : ~a\n" (string-append (car s) " " (cadr s)))
-      (unless (null? (caddr s))
-        (format #t "    ~a\n" (string-join (caddr s) "\n    "))))
-    (slot-ref unit 'slots))
-  )
 
 
 ;;unit-bottomからtypeにあったunitクラスに変換する
@@ -776,6 +743,62 @@
     [(string? from) (geninfo-from-file from no-cache)]
     [else #f])); TODO warging
 
+
+;-------***************-----------
+;API Out
+;-------***************-----------
+
+;;;;;
+;;ユニットのapi情報を標準出力に出力する
+;;api関数で検索したユニットを出力するために利用する
+(define-class <api-context> (<out-context>) ())
+
+(define-method initialize ((class <api-context>) initargs)
+  (let1 ret (next-method)
+    (slot-set! ret 'port (standard-output-port))
+    ret))
+
+(define-method output ((out <api-context>) (unit <unit-top>))
+  (let ([p (slot-ref out 'port)])
+    (format p "API are\n")
+    (format p "  type        : ~a\n" (ref unit 'type))
+    (format p "  name        : ~a\n" (ref unit 'name))
+    (unless (null? (ref unit 'description))
+      (format #t "  description : ~a\n" (string-join (ref unit 'description) "\n                ")))
+    ))
+
+(define-method output ((out <api-context>) (unit <unit-proc>))
+  (next-method)
+  (let ([port (slot-ref out 'port)])
+    (unless (null? (ref unit 'param))
+      (begin
+        (format port "  param       : ~a\n" (fold-right
+                                              (lambda (p acc) (string-append (car p) " " acc))
+                                              ""
+                                              (slot-ref unit 'param)))
+        (for-each
+          (lambda (p) 
+            (unless (null? (cdr p))
+              (format port "- param#~a : ~a\n" (car p) (string-join (cdr p) " "))))
+          (slot-ref unit 'param))))
+    (unless (null? (ref unit 'return))
+      (format port "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
+    ))
+
+(define-method output ((out <api-context>) (unit <unit-class>))
+  (next-method)
+  (let ([port (slot-ref out 'port)])
+    (unless (null? (slot-ref unit 'supers))
+      (format port "  supers      : ~a\n" (string-join (ref unit 'supers) " ")))
+    (for-each
+      (lambda (s)
+        (format port "  slot        : ~a\n" (string-append (car s) " " (cadr s)))
+        (unless (null? (caddr s))
+          (format port "    ~a\n" (string-join (caddr s) "\n    "))))
+      (slot-ref unit 'slots))
+    ))
+
+
 ;;ドキュメントの中からnameがsymbolのユニットを探す
 (define (find-unit str-symbol doc)
   (find (lambda (unit) (string=? str-symbol (ref unit 'name))) (ref doc 'units)))
@@ -806,7 +829,11 @@
      => (lambda (m) (find-unit (x->string symbol) (geninfo-from-module (module-name m) #f)))]
     [else #f]))
 
-
+(define (show-api unit)
+  (let ([out (make <api-context>)])
+    (with-output-to-port (slot-ref out 'port)
+                         (lambda ()
+                           (output out unit)))))
 
 ;;;;;
 ;;symbolのドキュメントユニットを探し、api情報を出力する
