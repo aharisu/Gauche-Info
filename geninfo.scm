@@ -224,13 +224,13 @@
 (define (set-tag tag unit) (slot-set! unit 'cur-tag tag))
 
 (define (set-unit-name name config unit)
-  (if (and ((get-allow-multiple "name") config unit) ((get-valid "name") name config unit))
-    (slot-set! unit 'name name))
+  (if ((get-allow-multiple "name") config unit)
+    ((get-init 'name) name config unit))
   unit)
 
 (define (set-unit-type type config unit)
-  (if (and ((get-allow-multiple "type") config unit) ((get-valid "type") type config unit))
-    (slot-set! unit 'type type))
+  (if ((get-allow-multiple "type") config unit)
+    ((get-init 'type) type config unit))
   unit)
 
 (define (append-text text config unit)
@@ -273,10 +273,10 @@
 
 (define tags '())
 
-(define-macro (define-tag name allow-multiple? init valid-text? appender)
-  `(set! tags (acons (symbol->string (quote ,name)) 
-                     (cons ,allow-multiple? (cons ,init (cons ,valid-text? ,appender)))
-                     tags)))
+(define-macro (define-tag name allow-multiple? init appender)
+              `(set! tags (acons (symbol->string (quote ,name)) 
+                                 (cons ,allow-multiple? (cons ,init ,appender))
+                                 tags)))
 
 (define (get-allow-multiple tag)
   (cond 
@@ -286,20 +286,14 @@
   (cond 
     [(assoc-ref tags (x->string tag)) => cadr]
     [else #f]))
-(define (get-valid tag)
-  (cond
-    [(assoc-ref tags (x->string tag)) => caddr]
-    [else #f]))
 (define (get-appender tag)
   (cond
-    [(assoc-ref tags (x->string tag)) => cdddr]
+    [(assoc-ref tags (x->string tag)) => cddr]
     [else #f]))
 
 (define (tag-allow-multiple-ret-true config unit) #t)
 
 (define (tag-init first-line config unit) first-line)
-
-(define (tag-valid-ret-true text config unit) #t)
 
 (define (tag-append-text tag) 
   (lambda (text config unit)
@@ -319,7 +313,6 @@
 (define-tag description
             tag-allow-multiple-ret-true
             tag-init
-            tag-valid-ret-true
             (tag-append-text 'description))
 
 ;;define @param tag
@@ -333,7 +326,6 @@
                                                   (cons (list (car tokens) (cadr tokens)) v)))
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "param name is required"))))]))
-            tag-valid-ret-true
             (lambda (text config unit)
               (slot-update! unit 'param 
                             (lambda (value)
@@ -344,7 +336,6 @@
 (define-tag return
             (lambda (config unit) (null? (slot-ref unit 'return)))
             tag-init
-            tag-valid-ret-true
             (tag-append-text 'return))
 
 
@@ -358,7 +349,6 @@
                       (slot-update! unit 'slots (lambda (v) (cons (list (car tokens) "" '()) v)))
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "slot name is required"))))]))
-            tag-valid-ret-true
             (lambda (text config unit)
               (slot-update! unit 'slots
                             (lambda (v)
@@ -369,8 +359,12 @@
 ;;define @name tag
 (define-tag name
             (lambda (config unit) (not (slot-ref unit 'name)))
-            tag-init
-            (lambda (text config unit) (not (slot-ref unit 'name)))
+            (lambda (first-line config unit)
+              (let ([name (read (open-input-string first-line))])
+                (if (eof-object? name)
+                  (raise (condition (<geninfo-warning> (message "@name tag required document unit name"))))
+                  (slot-set! unit 'name (x->string name)))
+                ""))
             (lambda (text config unit) (slot-set! unit 'name text)))
 
 
@@ -399,11 +393,15 @@
                    ))
 (define-tag type
             (lambda (config unit) (not (slot-ref unit 'type)))
-            tag-init
-            (lambda (text config unit) 
-              (and (not (slot-ref unit 'type))
-                   (find (lambda (x) (string=? text x)) allow-types)))
-            (lambda (text config unit) (slot-set! unit 'type text)))
+            (lambda (first-line config unit)
+              (let ([type (read (open-input-string first-line))])
+                (if (eof-object? type)
+                  (raise (condition (<geninfo-warning> (message "@type tag required type name"))))
+                  (let ([type (x->string type)])
+                    (if (find (lambda (x) (string=? type x)) allow-types)
+                      (slot-set! unit 'type type))))
+                ""))
+            (lambda (text config unit) (undefined)))
 
 
 ;;------------
@@ -421,7 +419,6 @@
                   (raise (condition (<geninfo-warning> (message "@parse-relative tag value selection is #t or #f"))))
                   (set-config config 'skip-relative (not parse?)))
                 ""))
-            tag-valid-ret-true
             (lambda (text config unit) (undefined)))
 
 
@@ -480,10 +477,7 @@
 ;;テキストを現在のタグ内に追加する
 (define (process-text text config unit)
   (if (not (string-null? text))
-    (if ((get-valid (get-tag unit)) text config unit)
-      (append-text text config unit)
-      (format #t "warning: invalid document text [\"~s\"].\n" text)
-      ))
+      (append-text text config unit))
   unit)
 
 ;;一つのドキュメントを最後までパースする
