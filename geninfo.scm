@@ -3,6 +3,7 @@
   (use srfi-13) ;;string util
   (use util.list)
   (use util.match)
+  (use file.util)
   (use text.parse)
   (use gauche.interactive)
   ;(export <doc> <geninfo-warning>
@@ -28,7 +29,7 @@
    (units :init-value '())
    ))
 
-(define (add-unit doc unit)
+(define (add-unit doc config unit)
   (slot-set! doc 'units (cons unit (slot-ref doc 'units)))
   unit)
 
@@ -244,7 +245,7 @@
                  (if (slot-ref unit 'name) "" " [no specification of a name]")
                  (if (slot-ref unit 'type) "" " [no specification of a type]")))
 
-(define (commit-unit unit)
+(define (commit-unit config unit)
   (if (valid-unit? unit)
     (spcify-unit (slot-ref unit 'type) unit)
     (raise (condition
@@ -459,15 +460,15 @@
   unit)
 
 ;;一つのドキュメントを最後までパースする
-(define (parse-doc unit)
+(define (parse-doc config unit)
   (cond 
     [(next-doc-text)
      => (lambda (text) 
-          (parse-doc (cond 
-                       [(process-tag text unit)
-                        => (lambda (text) (process-text text unit))]
-                       ;;TODO Warning
-                       [else (skip-current-tag) unit])))];skip tag text
+          (parse-doc config (cond 
+                              [(process-tag text unit)
+                               => (lambda (text) (process-text text unit))]
+                              ;;TODO Warning
+                              [else (skip-current-tag) unit])))];skip tag text
     [else unit]))
 
 
@@ -524,7 +525,7 @@
 
 
 ;;define, define-constantの解析を行う
-(define (analyze-normal-define l unit)
+(define (analyze-normal-define l config unit)
   (let ([constant? (eq? (car l) 'define-constant)])
     (match l
            [(_ (symbol args ...) _ ...) ;; lambda -> function
@@ -553,7 +554,7 @@
 
 ;;define-methodの解析を行う
 ;;TODO エラー処理
-(define (analyze-method-define l unit)
+(define (analyze-method-define l config unit)
   (if (null? (cdr l))
     #f);TODO warning
   (set-unit-name (symbol->string (cadr l)) unit)
@@ -565,28 +566,23 @@
 
 ;;stub用 define-cprocの解析を行う
 ;;TODO エラー処理
-(define (analyze-stub-proc-define l unit)
+(define (analyze-stub-proc-define l config unit)
   (set-unit-name (symbol->string (cadr l)) unit)
   (set-unit-type type-fn unit)
   (analyze-args (caddr l) 
                 (lambda (var)(string->symbol (car (string-split (symbol->string var) "::"))))
                 unit))
 
-;;defime-classの解析を行う
-(define (analyze-class-define l unit)
-  (set-unit-name (symbol->string (cadr l)) unit)
-  (set-unit-type type-class unit)
-  (slot-set! unit 'supers (map x->string (caddr l)))
+;;クラスのslot定義部分を解析
+;;さらに手書きのslotドキュメントとマージする
+(define (analyze-slots slots option-getter unit)
   (let ([org-slots (slot-ref unit 'slots)]
         [gen-slots (map 
                      (lambda (s)
                        (list (symbol->string (car s))
-                             (string-trim-right (fold-right
-                                                  (lambda (x acc) (string-append (x->writable-string x) " " acc))
-                                                  ""
-                                                  (cdr s)))
+                             (option-getter s)
                              '()))
-                     (cadddr l))])
+                     slots)])
     (for-each
       (lambda (s)
         (cond
@@ -594,7 +590,45 @@
            => (lambda (slot) (set-car! (cddr slot) (caddr s)))]
           [else (format #t "warning.")]))
       org-slots)
-    (slot-set! unit 'slots gen-slots)))
+    gen-slots))
+
+
+;;defime-classの解析を行う
+(define (analyze-class-define l config unit)
+  (set-unit-name (symbol->string (cadr l)) unit)
+  (set-unit-type type-class unit)
+  (slot-set! unit 'supers (map x->string (caddr l)))
+  (slot-set! unit 'slots (analyze-slots (cadddr l)
+                                        (lambda (s)
+                                          (string-trim-right (fold-right
+                                                               (lambda (x acc) (string-append (x->writable-string x) " " acc))
+                                                               ""
+                                                               (cdr s))))
+                                        unit)))
+
+;;stub用 define-cclassの解析を行う
+(define (analyze-stub-class-define l config unit)
+  (define (to-class hash class)
+    (if hash 
+      (hash-table-get hash class #f)
+      #f))
+  (let-values ([(supers slots) (let loop ([e l])
+                                 (if (list? (car e))
+                                   (values (car e) (cadr e))
+                                   (loop (cdr e))))]
+               [(classes) (get-config config 'stub-class)])
+    (set-unit-name (symbol->string (cadr l)) unit)
+    (set-unit-type type-class unit)
+    (slot-set! unit 'supers (map
+                              (lambda (x)
+                                (cond
+                                  [(to-class classes x) => e->e]
+                                  [else (raise (condition
+                                                 (<geninfo-warning> (message "super class is not found"))))]))
+                              supers))
+    (slot-set! unit 'slots (analyze-slots slots
+                                          (lambda (s) "")
+                                          unit))))
 
 
 
@@ -603,9 +637,10 @@
                  `(
                    (define . ,analyze-normal-define)
                    (define-constant . ,analyze-normal-define)
-                   (define-cproc . ,analyze-stub-proc-define)
                    (define-method . ,analyze-method-define)
                    (define-class . ,analyze-class-define)
+                   (define-cproc . ,analyze-stub-proc-define)
+                   (define-cclass . ,analyze-stub-class-define)
                    ))
 
 ;;解析可能な式か?
@@ -616,7 +651,7 @@
 
 ;;ドキュメントの直下にある式が定義であれば
 ;;ドキュメントと関連するものとして解析を行う
-(define (parse-related-define unit)
+(define (parse-related-define config unit)
   (let* ([org-fp (port-seek (current-input-port) 0 SEEK_CUR)]
          [exp (read)])
     ;;seek to origin point file pointer
@@ -624,8 +659,30 @@
                (- org-fp (port-seek (current-input-port) 0 SEEK_CUR))
                SEEK_CUR)
     (if (analyzable? exp)
-      ((assq-ref  analyzable-symbols (car exp)) exp unit))
+      ((assq-ref  analyzable-symbols (car exp)) exp config unit))
     unit))
+
+;;解析しようとしているファイルが.stubであれば事前解析を行う
+;;Cレベルのクラス名とGaucheレベルのクラス名の対応を取っておく
+(define (pre-parse-stub config)
+  (let ([classes (make-hash-table 'string=?)])
+    (port-for-each
+      (lambda (e)
+        (when (and (list? e) (eq? (car e) 'define-cclass))
+          (let* ([first? #t]
+                 [class (find 
+                          (lambda (e)
+                            (if (string? e)
+                              (if first?
+                                (begin (set! first? #f) #f)
+                                #t)
+                              #f))
+                          e)])
+            (if class
+              (hash-table-put! classes class (symbol->string (cadr e)))))))
+      read)
+    (port-seek (current-input-port) 0)
+    (set-config config 'stub-class classes)))
 
 
 ;-------***************-----------
@@ -636,19 +693,30 @@
 (define (doc-start-line? line)
   (boolean (rxmatch #/^\s*\;\;\;\;\;/ line)))
 
+;;ドキュメント解析時の各種設定を設定
+(define (set-config config slot v)
+  (hash-table-put! config slot v))
+
+;;ドキュメント解析時の各種設定を取得
+(define (get-config config slot)
+  (hash-table-get config slot #f))
+
 (define (read-all-doc filename)
-  (let ([doc (make <doc>)])
+  (let ([doc (make <doc>)]
+        [config (make-hash-table)])
     (with-input-from-file 
       filename
       (lambda ()
+        (when (string=? (path-extension filename) "stub")
+          (pre-parse-stub config))
         (port-for-each
           (lambda (line)
             (when (doc-start-line? line)
               (port-seek (current-input-port) (- (string-size line)) SEEK_CUR)
-              (show (add-unit doc 
-                              (commit-unit 
-                                (parse-related-define 
-                                  (parse-doc (make <unit-bottom>))))))))
+              (show (add-unit doc config
+                              (commit-unit config
+                                           (parse-related-define config 
+                                                                 (parse-doc config (make <unit-bottom>))))))))
           read-line)))
     (commit-doc doc)))
 
