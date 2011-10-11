@@ -52,10 +52,10 @@
 ;;<unit-bottom>の各スロットから値をコピーする
 ;;これ以降unitを編集することはない
 (define-method commit ((unit <unit-top>) original)
- (slot-set! unit 'name (slot-ref original 'name))
- (slot-set! unit 'type (slot-ref original 'type))
- (slot-set! unit 'description (reverse (slot-ref original 'description)))
- unit)
+  (slot-set! unit 'name (slot-ref original 'name))
+  (slot-set! unit 'type (slot-ref original 'type))
+  (slot-set! unit 'description (reverse (slot-ref original 'description)))
+  unit)
 
 
 (define-method show ((unit <unit-top>))
@@ -113,10 +113,10 @@
 
 (define-method initialize ((class <unit-bottom>) initargs)
   (let1 ret (next-method)
-        (for-each
-          (lambda (proc) (proc ret initargs))
-          unit-bottom-initializer)
-        ret))
+    (for-each
+      (lambda (proc) (proc ret initargs))
+      unit-bottom-initializer)
+    ret))
 
 
 ;;functionやmethodタイプ用のunit
@@ -209,7 +209,7 @@
 
 ;;unit-bottomからtypeにあったunitクラスに変換する
 (define-macro (or-equal? x . any)
-              `(or ,@(map (lambda (y) `(equal? ,x ,y)) any)))
+  `(or ,@(map (lambda (y) `(equal? ,x ,y)) any)))
 (define (spcify-unit type unit)
   (commit (cond
             [(or-equal? type type-fn type-method) (make <unit-proc> unit)]
@@ -250,7 +250,7 @@
     [(and (slot-ref unit 'type) (equal? (slot-ref unit 'type) type-cmd)) #f]
     [(valid-unit? unit) (spcify-unit (slot-ref unit 'type) unit)]
     [else (raise (condition
-             (<geninfo-warning> (message (get-invalid-unit-reason unit)))))]))
+                   (<geninfo-warning> (message (get-invalid-unit-reason unit)))))]))
 
 
 ;-------***************-----------
@@ -258,25 +258,25 @@
 ;-------***************-----------
 (define (x->writable-string x)
   (match x
-         [(? string? x) (string-append "\"" x "\"")]
-         ;[(symbol? x) (string-append "'" (symbol->string x))]
-         [(? keyword? x) (string-append ":" (keyword->string x))]
-         [('quote x) (string-append "'" (x->writable-string x))]
-         [(? list? x) (string-append "(" 
-                                     (string-trim-right
-                                       (fold-right
-                                         (lambda (x acc) (string-append (x->writable-string x) " " acc))
-                                         ""
-                                         x))
-                                     ")")]
-         [x (x->string x)]))
+    [(? string? x) (string-append "\"" x "\"")]
+    ;[(symbol? x) (string-append "'" (symbol->string x))]
+    [(? keyword? x) (string-append ":" (keyword->string x))]
+    [('quote x) (string-append "'" (x->writable-string x))]
+    [(? list? x) (string-append "(" 
+                                (string-trim-right
+                                  (fold-right
+                                    (lambda (x acc) (string-append (x->writable-string x) " " acc))
+                                    ""
+                                    x))
+                                ")")]
+    [x (x->string x)]))
 
 (define tags '())
 
 (define-macro (define-tag name allow-multiple? init appender)
-              `(set! tags (acons (symbol->string (quote ,name)) 
-                                 (cons ,allow-multiple? (cons ,init ,appender))
-                                 tags)))
+  `(set! tags (acons (symbol->string (quote ,name)) 
+                     (cons ,allow-multiple? (cons ,init ,appender))
+                     tags)))
 
 (define (get-allow-multiple tag)
   (cond 
@@ -305,8 +305,8 @@
     (if (eof-object? first)
       #f
       (append (match first
-                     [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
-                     [sym (list (x->writable-string sym) (x->writable-string sym))])
+                [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
+                [sym (list (x->writable-string sym) (x->writable-string sym))])
               (cons (string-trim (port->string port)) '())))))
 
 ;;define @description tag
@@ -382,15 +382,15 @@
 (define-constant type-cmd "cmd")
 
 (define-constant allow-types 
-                 `(
-                   ,type-fn
-                   ,type-var
-                   ,type-method
-                   ,type-const
-                   ,type-parameter
-                   ,type-class
-                   ,type-cmd
-                   ))
+  `(
+    ,type-fn
+    ,type-var
+    ,type-method
+    ,type-const
+    ,type-parameter
+    ,type-class
+    ,type-cmd
+    ))
 (define-tag type
             (lambda (config unit) (not (slot-ref unit 'type)))
             (lambda (first-line config unit)
@@ -440,9 +440,9 @@
               (values
                 (substring token 1 index)
                 (substring token (+ index 1) (string-length token))))]
-        [else (values
-                (substring token 1 (string-length token))
-                "")]))
+    [else (values
+            (substring token 1 (string-length token))
+            "")]))
 
 ;;次のタグかドキュメントの終わりまで本文のテキストをスキップする
 (define (skip-current-tag)
@@ -462,22 +462,22 @@
 (define (process-tag text config unit)
   (if (eq? #\@ (string-ref text 0))
     (let-values ([(tag text) (split-tag-and-text text)])
-                (cond 
-                  [(get-allow-multiple tag) 
-                   => (lambda (pred) 
-                        (if (pred config unit)
-                          (begin
-                            (set-tag (string->symbol tag) unit)
-                            ((get-init tag) text config unit))
-                          #f))]
-                  [else (raise (condition
-                                 (<geninfo-warning> (message #`"unkwon tag name [,tag]."))))]))
+      (cond 
+        [(get-allow-multiple tag) 
+         => (lambda (pred) 
+              (if (pred config unit)
+                (begin
+                  (set-tag (string->symbol tag) unit)
+                  ((get-init tag) text config unit))
+                #f))]
+        [else (raise (condition
+                       (<geninfo-warning> (message #`"unkwon tag name [,tag]."))))]))
     text))
 
 ;;テキストを現在のタグ内に追加する
 (define (process-text text config unit)
   (if (not (string-null? text))
-      (append-text text config unit))
+    (append-text text config unit))
   unit)
 
 ;;一つのドキュメントを最後までパースする
@@ -503,31 +503,31 @@
         [init (get-init 'param)])
     (let loop ([args args])
       (match args
-             [(:optional spec ...) 
-              (init ":optional" config unit)
-              (loop spec)]
-             [(:key spec ...) 
-              (init ":key" config unit)
-              (loop spec)]
-             [(:allow-other-keys spec ...)
-              (init ":allow-other-keys" config unit)
-              (loop spec)]
-             [(:rest var spec ...)
-              (init ":rest" config unit)
-              (init (symbol->string (func-get-var var)) config unit)
-              (loop spec)]
-             [(((keyword var) init-exp) spec ...) 
-              (init 
-                #`"((,(x->writable-string keyword) ,(x->writable-string (func-get-var var))) ,(x->writable-string init-exp))"
-                config unit)
-              (loop spec)]
-             [((var init-exp) spec ...) 
-              (init #`"(,(symbol->string (func-get-var var)) ,(x->writable-string init-exp))" config unit)
-              (loop spec)]
-             [(var args ...) 
-              (init (symbol->string (func-get-var var)) config unit)
-              (loop args)]
-             [() (slot-ref unit 'param)]))))
+        [(:optional spec ...) 
+         (init ":optional" config unit)
+         (loop spec)]
+        [(:key spec ...) 
+         (init ":key" config unit)
+         (loop spec)]
+        [(:allow-other-keys spec ...)
+         (init ":allow-other-keys" config unit)
+         (loop spec)]
+        [(:rest var spec ...)
+         (init ":rest" config unit)
+         (init (symbol->string (func-get-var var)) config unit)
+         (loop spec)]
+        [(((keyword var) init-exp) spec ...) 
+         (init 
+           #`"((,(x->writable-string keyword) ,(x->writable-string (func-get-var var))) ,(x->writable-string init-exp))"
+           config unit)
+         (loop spec)]
+        [((var init-exp) spec ...) 
+         (init #`"(,(symbol->string (func-get-var var)) ,(x->writable-string init-exp))" config unit)
+         (loop spec)]
+        [(var args ...) 
+         (init (symbol->string (func-get-var var)) config unit)
+         (loop args)]
+        [() (slot-ref unit 'param)]))))
 
 
 ;;lambda式の仮引数部を解析する
@@ -549,29 +549,29 @@
 (define (analyze-normal-define l config unit)
   (let ([constant? (eq? (car l) 'define-constant)])
     (match l
-           [(_ (symbol args ...) _ ...) ;; lambda -> function
-            (set-unit-name (symbol->string symbol) config unit)
-            (set-unit-type type-fn config unit) 
-            (analyze-args args e->e config unit)]
+      [(_ (symbol args ...) _ ...) ;; lambda -> function
+       (set-unit-name (symbol->string symbol) config unit)
+       (set-unit-type type-fn config unit) 
+       (analyze-args args e->e config unit)]
 
-           [(_ symbol exp) 
-            (set-unit-name (symbol->string symbol) config unit)
-            (match exp
-                   [(or ('lambda (args ...) _ ...) ;; lambda -> function
-                        ('^ (args ...) _ ...))
-                    (set-unit-type type-fn config unit)
-                    (analyze-args args e->e config unit)]
-                   [(or ('lambda arg _ ...) ;; lambda -> function
-                        ('^ arg _ ...))
-                    (set-unit-type type-fn config unit)
-                    (analyze-args (list :rest arg) e->e config unit)]
-                   [else (set-unit-type (if constant? type-const type-var) config unit)])];; other -> var or constant
+      [(_ symbol exp) 
+       (set-unit-name (symbol->string symbol) config unit)
+       (match exp
+         [(or ('lambda (args ...) _ ...) ;; lambda -> function
+            ('^ (args ...) _ ...))
+          (set-unit-type type-fn config unit)
+          (analyze-args args e->e config unit)]
+         [(or ('lambda arg _ ...) ;; lambda -> function
+            ('^ arg _ ...))
+          (set-unit-type type-fn config unit)
+          (analyze-args (list :rest arg) e->e config unit)]
+         [else (set-unit-type (if constant? type-const type-var) config unit)])];; other -> var or constant
 
-           [(_ symbol) ;; other -> var or constant
-            (set-unit-name (symbol->string symbol) config unit)
-            (set-unit-type (if constant? type-const type-var) config unit)]
+      [(_ symbol) ;; other -> var or constant
+       (set-unit-name (symbol->string symbol) config unit)
+       (set-unit-type (if constant? type-const type-var) config unit)]
 
-           [(_) #f])))
+      [(_) #f])))
 
 ;;define-methodの解析を行う
 ;;TODO エラー処理
@@ -655,14 +655,14 @@
 
 ;;解析可能な式のリスト
 (define-constant analyzable-symbols 
-                 `(
-                   (define . ,analyze-normal-define)
-                   (define-constant . ,analyze-normal-define)
-                   (define-method . ,analyze-method-define)
-                   (define-class . ,analyze-class-define)
-                   (define-cproc . ,analyze-stub-proc-define)
-                   (define-cclass . ,analyze-stub-class-define)
-                   ))
+  `(
+    (define . ,analyze-normal-define)
+    (define-constant . ,analyze-normal-define)
+    (define-method . ,analyze-method-define)
+    (define-class . ,analyze-class-define)
+    (define-cproc . ,analyze-stub-proc-define)
+    (define-cclass . ,analyze-stub-class-define)
+    ))
 
 ;;解析可能な式か?
 (define (analyzable? exp)
@@ -807,6 +807,7 @@
     [else #f]))
 
 
+
 ;;;;;
 ;;symbolのドキュメントユニットを探し、api情報を出力する
 (define (api symbol :key from)
@@ -814,8 +815,9 @@
   (guard (e
            ;;TODO もうちょっとましな警告表示
            [(<geninfo-warning> e) (format #t "~s\n" (slot-ref e 'message))])
-         (cond
-           [(find-doc-unit (x->string symbol) (if (undefined? from) #f from)) => show-api]
-           [(find-doc-unit-in-modules symbol) => show-api]
-           [else #f])))
+    (cond
+      [(find-doc-unit (x->string symbol) (if (undefined? from) #f from)) => show-api]
+      [(find-doc-unit-in-modules symbol) => show-api]
+      [else #f])))
+
 
