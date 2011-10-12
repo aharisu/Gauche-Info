@@ -819,7 +819,7 @@
 ;;symbolと同じ名前を持つユニットを探す
 (define (find-doc-unit symbol from)
   (if from
-    (find-unit symbol (geninfo-from-file from #f))
+    (find-unit symbol (geninfo from #f))
     (call/cc (lambda (c)
                (hash-table-for-each docs (lambda (name doc) (cond [(find-unit symbol doc) => c])))
                #f))))
@@ -849,7 +849,6 @@
 ;;;;;
 ;;symbolのドキュメントユニットを探し、api情報を出力する
 (define (api symbol :key from)
-  (define (show-unit unit) (show-unit-api unit) #t)
   (guard (e
            ;;TODO もうちょっとましな警告表示
            [(<geninfo-warning> e) (format #t "~s\n" (slot-ref e 'message))])
