@@ -156,9 +156,9 @@
 
 (define-method commit ((unit <unit-class>) original)
   (next-method)
-  (slot-set! unit 'supers (slot-ref original 'supers))
+  (slot-set! unit 'supers (reverse (slot-ref original 'supers)))
   (slot-set! unit 'slots (map
-                           (lambda (s) (list (car s) (cadr s) (reverse (caddr s))))
+                           (lambda (s) (list (car s) (reverse (cadr s))))
                            (slot-ref original 'slots)))
   unit)
 
@@ -313,14 +313,29 @@
               (cond
                 [(split-first-token first-line)
                  => (lambda (tokens)
-                      (slot-update! unit 'slots (lambda (v) (cons (list (car tokens) "" '()) v)))
+                      (slot-update! unit 'slots (lambda (v) (cons (list (car tokens) '()) v)))
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "slot name is required"))))]))
             (lambda (text config unit)
               (slot-update! unit 'slots
                             (lambda (v)
-                              (set-car! (cddr (car v)) (cons text (caddr (car v))))
+                              (set-car! (cdr (car v)) (cons text (cadr (car v))))
                               v))))
+
+;;define @supers tag
+(define-tag supers
+            (lambda (config unit) (null? (slot-ref unit 'return)))
+            tag-init
+            (lambda (text config unit)
+              (slot-update! unit 'supers
+                            (lambda (value)
+                            (fold
+                              (lambda (t acc)
+                                (if (string-null? t)
+                                  acc
+                                  (cons t acc)))
+                              value
+                            (string-split text #[\s]))))))
 
 
 ;;define @name tag
@@ -563,19 +578,18 @@
 
 ;;クラスのslot定義部分を解析
 ;;さらに手書きのslotドキュメントとマージする
-(define (analyze-slots slots option-getter unit)
+(define (analyze-slots slots unit)
   (let ([org-slots (slot-ref unit 'slots)]
         [gen-slots (map 
                      (lambda (s)
                        (list (symbol->string (car s))
-                             (option-getter s)
                              '()))
                      slots)])
     (for-each
       (lambda (s)
         (cond
           [(assoc (car s) gen-slots)
-           => (lambda (slot) (set-car! (cddr slot) (caddr s)))]
+           => (lambda (slot) (set-car! (cdr slot) (cadr s)))]
           [else (format #t "warning.")]))
       org-slots)
     gen-slots))
@@ -585,14 +599,8 @@
 (define (analyze-class-define l config unit)
   (set-unit-name (symbol->string (cadr l)) config unit)
   (set-unit-type type-class config unit)
-  (slot-set! unit 'supers (map x->string (caddr l)))
-  (slot-set! unit 'slots (analyze-slots (cadddr l)
-                                        (lambda (s)
-                                          (string-trim-right (fold-right
-                                                               (lambda (x acc) (string-append (x->writable-string x) " " acc))
-                                                               ""
-                                                               (cdr s))))
-                                        unit)))
+  (slot-set! unit 'supers (map x->string (reverse (caddr l))))
+  (slot-set! unit 'slots (analyze-slots (cadddr l) unit)))
 
 ;;stub用 define-cclassの解析を行う
 (define (analyze-stub-class-define l config unit)
@@ -613,10 +621,8 @@
                                   [(to-class classes x) => e->e]
                                   [else (raise (condition
                                                  (<geninfo-warning> (message "super class is not found"))))]))
-                              supers))
-    (slot-set! unit 'slots (analyze-slots slots
-                                          (lambda (s) "")
-                                          unit))))
+                              (reverse supers)))
+    (slot-set! unit 'slots (analyze-slots slots unit))))
 
 
 
