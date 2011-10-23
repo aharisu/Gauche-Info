@@ -568,6 +568,15 @@
   (analyze-args (caddr l) e->e config unit))
 
 
+(define (convert-type type)
+  (let ([conv '(
+                (<void> . "#<undefined>")
+                )])
+    (cond
+      [(assq-ref conv type #f) => e->e]
+      [else (symbol->string type)])))
+
+
 ;;stub用 define-cprocの解析を行う
 ;;TODO エラー処理
 (define (analyze-stub-proc-define l config unit)
@@ -575,7 +584,23 @@
   (set-unit-type type-fn config unit)
   (analyze-args (caddr l) 
                 (lambda (var)(string->symbol (car (string-split (symbol->string var) "::"))))
-                config unit))
+                config unit)
+  (let ([ret (if (string=? (x->string (cadddr l)) ":")
+               (car (cddddr l))
+               (string->symbol (string-drop (x->string (cadddr l)) 1)))])
+    (slot-update! unit 'return
+                  (lambda (v)
+                    (append v (cons (if (list? ret)
+                                      (string-append (fold
+                                                       (lambda (type acc)
+                                                         (string-append acc 
+                                                                        " "
+                                                                        (convert-type type)))
+                                                       "(values"
+                                                       ret)
+                                                     ")")
+                                      (convert-type ret))
+                                    '()))))))
 
 ;;クラスのslot定義部分を解析
 ;;さらに手書きのslotドキュメントとマージする
