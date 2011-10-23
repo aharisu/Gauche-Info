@@ -523,7 +523,7 @@
         (cond
           [(assoc (car p) gen-param)
            => (lambda (param) (set-cdr! param (cdr p)))]
-          [else (format #t "warning.")])) ;TODO warging
+          [else (print "analyze-args warning. " (car p))])) ;TODO warging
       org-param)
     (slot-set! unit 'param gen-param)))
 
@@ -616,7 +616,7 @@
         (cond
           [(assoc (car s) gen-slots)
            => (lambda (slot) (set-car! (cdr slot) (cadr s)))]
-          [else (format #t "warning.")]))
+          [else (print "analyze-slots warning." (car s))]))
       org-slots)
     gen-slots))
 
@@ -738,7 +738,7 @@
                 [(commit-unit config
                               (parse-related-define config 
                                                     (parse-doc config (make <unit-bottom>))))
-                 => (lambda (unit) (show (add-unit doc config unit)))])))
+                 => (lambda (unit) (add-unit doc config unit))])))
           read-line)))
     (commit-doc doc)))
 
@@ -816,7 +816,7 @@
       (for-each
         (lambda (p) 
           (unless (null? (cdr p))
-            (format #t "- param#~a : ~a\n" (car p) (string-join (cdr p) " "))))
+            (format #t "- param##~a :\n    ~a\n" (car p) (string-join (cdr p) "\n    " ))))
         (slot-ref unit 'param))))
   (unless (null? (ref unit 'return))
     (format #t "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
@@ -880,6 +880,7 @@
     (cond
       [(find-doc-unit (x->string symbol) (if (undefined? from) #f from)) => show-api]
       [(find-doc-unit-in-modules symbol) => show-api]
-      [else #f])))
+      [else #f]))
+  (values))
 
 
