@@ -1,4 +1,4 @@
-(define-module geninfo
+(define-module ginfo
   (use srfi-11) ;;let-values
   (use srfi-13) ;;string util
   (use util.list)
@@ -11,7 +11,7 @@
   ;				api geninfo)
   (export-all))
 
-(select-module geninfo)
+(select-module ginfo)
 
 (define e->e (lambda (e) e))
 
