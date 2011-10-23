@@ -750,13 +750,19 @@
 ;;一度解析したファイルのドキュメントをキャッシュしておく
 (define-constant docs (make-hash-table 'string=?))
 
+(define (to-abs-path path)
+  (if (absolute-path? path)
+    path
+    (build-path (current-directory) path)))
+
 (define (geninfo-from-file path no-cache)
-  (cond
-    [(and (not no-cache) (hash-table-get docs path #f)) => e->e]
-    [else (let ([doc (read-all-doc path)])
-            (if (not no-cache)
-              (hash-table-put! docs path doc))
-            doc)]))
+  (let ([abs-path (to-abs-path path)])
+    (cond
+      [(and (not no-cache) (hash-table-get docs abs-path #f)) => e->e]
+      [else (let ([doc (read-all-doc abs-path)])
+              (if (not no-cache)
+                (hash-table-put! docs abs-path doc))
+              doc)])))
 
 (define (geninfo-from-module symbol no-cache)
   (let ([path (library-fold symbol (lambda (l p acc) (cons p acc)) '())])
