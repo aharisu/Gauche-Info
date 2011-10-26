@@ -125,10 +125,10 @@
   (next-method)
   (slot-set! unit 'description (reverse (slot-ref original 'description)))
   (slot-set! unit 'return (reverse (slot-ref original 'return)))
-  ;;この時点で(hidden new text1 text2 ...)のリスト構造から(new text1 text2 ...)のリスト構造に修正する
+  ;;この時点で(hidden new (text1 text2 ...))のリスト構造から(new (text1 text2 ...))のリスト構造に修正する
   ;;hiddenとnewは自動解析結果の引数名を手動で修正するためにある
   (slot-set! unit 'param (map 
-                           (lambda (p)(cons (cadr p) (reverse (cddr p))))
+                           (lambda (p)(list (cadr p) (reverse (caddr p))))
                            (reverse (slot-ref original 'param))))
   unit)
 
@@ -291,13 +291,15 @@
                 [(split-first-token first-line) 
                  => (lambda (tokens)
                       (slot-update! unit 'param (lambda (v)
-                                                  (cons (list (car tokens) (cadr tokens)) v)))
+                                                  (cons 
+                                                      (list (car tokens) (cadr tokens) '())
+                                                      v)))
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "param name is required"))))]))
             (lambda (text config unit)
               (slot-update! unit 'param 
                             (lambda (value)
-                              (set-cdr! (cdar value) (cons text (cddar value)))
+                              (set-car! (cddr (car value)) (cons text (caddr (car value))))
                               value))))
 
 ;;define @return tag
@@ -821,8 +823,8 @@
                                           (slot-ref unit 'param)))
       (for-each
         (lambda (p) 
-          (unless (null? (cdr p))
-            (format #t "- param##~a :\n    ~a\n" (car p) (string-join (cdr p) "\n    " ))))
+          (unless (null? (cadr p))
+            (format #t "- param##~a :\n    ~a\n" (car p) (string-join (cadr p) "\n    " ))))
         (slot-ref unit 'param))))
   (unless (null? (ref unit 'return))
     (format #t "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
