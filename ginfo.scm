@@ -268,14 +268,17 @@
     (slot-update! unit tag (lambda (value) (cons text value)))))
 
 (define (split-first-token line)
-  (let* ([port (open-input-string line)]
-         [first (read port)])
-    (if (eof-object? first)
-      #f
-      (append (match first
-                [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
-                [sym (list (x->writable-string sym) (x->writable-string sym))])
-              (cons (string-trim (port->string port)) '())))))
+  (let ([port (open-input-string line)])
+    (if (zero? (string-length (string-trim (next-token-of '(#\space #\tab #\.) port))))
+      (let ([first (read port)])
+        (if (eof-object? first)
+          #f
+          (append (match first
+                    [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
+                    [sym (list (x->writable-string sym) (x->writable-string sym))])
+                  (cons (string-trim (port->string port)) '()))))
+      ;;param name is "."
+      (list "." "." (string-trim (port->string port))))))
 
 ;;define @description tag
 (define-tag description
@@ -482,11 +485,26 @@
 ;;analyze define expression
 ;-------***************-----------
 
+(define (cell->list args)
+  (define (c->l args c)
+    (cond 
+      [(pair? (cdr args))
+       (c->l (cdr args) (cons (car args) c))]
+      [(null? (cdr args))
+       (reverse (cons (car args) c))]
+      [else (reverse (append
+                       (list (cdr args) (string->symbol ".") (car args))
+                       c))]))
+  (if (null? args)
+    args
+    (c->l args '())))
+
+
 ;;仮引数部をマッチングしながら再帰的に解析する
 (define (parse-each-arg args func-get-var config)
   (let ([unit (make <unit-proc>)]
         [init (get-init 'param)])
-    (let loop ([args args])
+    (let loop ([args (cell->list args)])
       (match args
         [(:optional spec ...) 
          (init ":optional" config unit)
