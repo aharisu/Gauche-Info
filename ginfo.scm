@@ -1,4 +1,5 @@
 (define-module ginfo
+  (use srfi-1)  ;;filter
   (use srfi-11) ;;let-values
   (use srfi-13) ;;string util
   (use util.list)
@@ -33,7 +34,7 @@
 ;;一つのドキュメントを表すクラス
 (define-class <doc> ()
   (
-   (units :init-value '())
+   (units :init-keyword :units :init-value '())
    ))
 
 (define (add-unit doc config unit)
@@ -82,6 +83,7 @@
       [else (next-method)])
     (begin  ;set
       (hash-table-put! (slot-ref obj '%slots) slot (car value))
+      (slot-set! obj 'initial-state? #f)
       (undefined))))
 
 ;;スロットに対する更新関数
@@ -89,7 +91,8 @@
   (cond
     [(find (lambda (s) (eq? (car s) slot)) (class-slots (class-of obj)))
      (slot-set! obj slot (f (slot-ref obj slot)))]
-    [else (hash-table-update! (slot-ref obj '%slots) slot f)]))
+    [else (hash-table-update! (slot-ref obj '%slots) slot f)
+      (slot-set! obj 'initial-state? #f)]))
 
 ;;全てのドキュメントユニットの下位クラス
 ;;存在しないスロットもハッシュテーブルとして持つことで疑似的に下位クラスのように扱う
@@ -97,6 +100,7 @@
 (define-class <unit-bottom> (<unit-top>)
   (
    (%slots :init-value (make-hash-table))
+   (initial-state?)
    )
   :metaclass <unit-bottom-meta>)
 
@@ -111,7 +115,16 @@
     (for-each
       (lambda (proc) (proc ret initargs))
       unit-bottom-initializer)
+    (slot-set! ret 'initial-state? #t)
     ret))
+
+(define (initial-state? unit)
+  (if (is-a? unit <unit-bottom>)
+    (not (or (slot-ref unit 'name)
+           (slot-ref unit 'type)
+           (not (zero? (length (slot-ref unit 'description))))
+           (not (slot-ref unit 'initial-state?))))
+    #f))
 
 
 ;;functionやmethodタイプ用のunit
@@ -689,16 +702,10 @@
     (boolean (assq (car exp) analyzable-symbols))
     #f))
 
-;;ドキュメントの直下にある式が定義であれば
-;;ドキュメントと関連するものとして解析を行う
-(define (parse-related-define config unit)
-  (unless (get-config config 'skip-relative) 
-    (let* ([org-fp (port-seek (current-input-port) 0 SEEK_CUR)]
-           [exp (read)])
-      ;;seek to origin point file pointer
-      (port-seek (current-input-port) 
-                 (- org-fp (port-seek (current-input-port) 0 SEEK_CUR))
-                 SEEK_CUR)
+;;式が解析可能であればドキュメントに含める
+(define (parse-expression config unit)
+  (let ([exp (read)])
+    (unless (get-config config 'skip-relative) 
       (if (analyzable? exp)
         ((assq-ref  analyzable-symbols (car exp)) exp config unit))))
   unit)
@@ -734,6 +741,11 @@
 (define (doc-start-line? line)
   (boolean (rxmatch #/^\s*\;\;\;\;\;/ line)))
 
+;;行に式が含まれているか？
+(define (exp-start-line? line)
+  (not (or (zero? (string-length (string-trim line)))
+         (rxmatch #/^\s*(?:\|#)?\s*(?:;|#\||#;).*/ line))))
+
 ;;ドキュメント解析時の各種設定を設定
 (define (set-config config slot v)
   (hash-table-put! config slot v))
@@ -742,23 +754,37 @@
 (define (get-config config slot)
   (hash-table-get config slot #f))
 
+;;一行分ファイルポインタを元に戻す
+(define-constant newline-size (string-size "\n"))
+(define (restore-fp-with-line line)
+  (port-seek (current-input-port) (- (+ (string-size line) 
+                                        newline-size)) SEEK_CUR))
+
 (define (read-all-doc filename)
   (let ([doc (make <doc>)]
-        [config (make-hash-table)])
-    (with-input-from-file 
+        [config (make-hash-table)]
+        [cur-unit (make <unit-bottom>)])
+    (with-input-from-file
       filename
       (lambda ()
         (when (string=? (path-extension filename) "stub")
           (pre-parse-stub config))
         (port-for-each
           (lambda (line)
-            (when (doc-start-line? line)
-              (port-seek (current-input-port) (- (string-size line)) SEEK_CUR)
-              (cond
-                [(commit-unit config
-                              (parse-related-define config 
-                                                    (parse-doc config (make <unit-bottom>))))
-                 => (lambda (unit) (add-unit doc config unit))])))
+            (cond
+              [(exp-start-line? line) 
+               (restore-fp-with-line line)
+               (let ([u (parse-expression config cur-unit)])
+                 (unless (initial-state? u)
+                   (add-unit doc config (commit-unit config u))
+                   (set! cur-unit (make <unit-bottom>))))]
+              [(doc-start-line? line) 
+               (restore-fp-with-line line)
+               (unless (initial-state? cur-unit)
+                 (add-unit doc config (commit-unit config cur-unit))
+                 (set! cur-unit (make <unit-bottom>)))
+               (set! cur-unit (parse-doc config cur-unit))]
+            ))
           read-line)))
     (commit-doc doc)))
 
@@ -789,12 +815,20 @@
     (if (null? path)
       (raise (condition
                (<geninfo-warning> (message "module not found"))))
-      (geninfo-from-file (car path) no-cache))))
+      (let ([doc (geninfo-from-file (car path) no-cache)]
+            [exports (module-exports (find-module symbol))])
+        (if (boolean? exports)
+          doc
+          (make <doc> :units (filter
+                               (lambda (u) 
+                                 (let ([n (string->symbol (slot-ref u 'name))]) 
+                                   (find (cut eq? <> n) exports)))
+                               (slot-ref doc 'units))))))))
 
 ;;;;;
 ;;ファイルを解析しドキュメントユニットを生成する
 ;; @param from シンボルであれば、モジュール名として扱われ現在のロードパスからファイルを検索して解析する
-;;				文字列であれば、ファイルへのパス名として扱われそのパスに存在するファイルを解析する
+;;文字列であれば、ファイルへのパス名として扱われそのパスに存在するファイルを解析する
 (define (geninfo from :optional (no-cache #f))
   (cond
     [(symbol? from) (geninfo-from-module from no-cache)]
