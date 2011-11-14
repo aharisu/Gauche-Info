@@ -571,17 +571,23 @@
        (analyze-args args e->e config unit)]
 
       [(_ symbol exp) 
-       (set-unit-name (symbol->string symbol) config unit)
-       (match exp
-         [(or ('lambda (args ...) _ ...) ;; lambda -> function
-            ('^ (args ...) _ ...))
-          (set-unit-type type-fn config unit)
-          (analyze-args args e->e config unit)]
-         [(or ('lambda arg _ ...) ;; lambda -> function
-            ('^ arg _ ...))
-          (set-unit-type type-fn config unit)
-          (analyze-args (list :rest arg) e->e config unit)]
-         [else (set-unit-type (if constant? type-const type-var) config unit)])];; other -> var or constant
+       (if (pair? symbol)
+         (begin
+           (set-unit-name (symbol->string (car symbol)) config unit)
+           (set-unit-type type-fn config unit)
+           (analyze-args (cdr symbol) e->e config unit))
+         (begin 
+           (set-unit-name (symbol->string symbol) config unit)
+           (match exp 
+             [(or ('lambda (args ...) _ ...) ;; lambda -> function
+                ('^ (args ...) _ ...))
+              (set-unit-type type-fn config unit)
+              (analyze-args args e->e config unit)]
+             [(or ('lambda arg _ ...) ;; lambda -> function
+                ('^ arg _ ...))
+              (set-unit-type type-fn config unit)
+              (analyze-args (list :rest arg) e->e config unit)]
+             [else (set-unit-type (if constant? type-const type-var) config unit)])))];; other -> var or constant
 
       [(_ symbol) ;; other -> var or constant
        (set-unit-name (symbol->string symbol) config unit)
@@ -739,7 +745,7 @@
 
 ;;ドキュメントの開始マーカーがあるか?
 (define (doc-start-line? line)
-  (boolean (rxmatch #/^\s*\;\;\;\;\;/ line)))
+  (boolean (rxmatch #/^\s*\;\;\;\;\;(?!;)/ line)))
 
 ;;行に式が含まれているか？
 (define (exp-start-line? line)
@@ -810,13 +816,17 @@
                 (hash-table-put! docs abs-path doc))
               doc)])))
 
+(define (get-module-exports module)
+  (eval `(require ,(module-name->path module)) 'gauche)
+  (module-exports (find-module module)))
+
 (define (geninfo-from-module symbol no-cache)
   (let ([path (library-fold symbol (lambda (l p acc) (cons p acc)) '())])
     (if (null? path)
       (raise (condition
                (<geninfo-warning> (message "module not found"))))
       (let ([doc (geninfo-from-file (car path) no-cache)]
-            [exports (module-exports (find-module symbol))])
+            [exports (get-module-exports symbol)])
         (if (boolean? exports)
           doc
           (make <doc> :units (filter
