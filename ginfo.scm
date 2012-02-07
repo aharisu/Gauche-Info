@@ -14,8 +14,6 @@
 
 (select-module ginfo)
 
-(define e->e (lambda (e) e))
-
 ;-------***************-----------
 ;data structure
 ;-------***************-----------
@@ -81,7 +79,7 @@
 (define-method slot-missing ((class <unit-bottom-meta>) obj slot . value)
   (if (null? value)
     (cond ;get
-      [(hash-table-get (slot-ref obj '%slots) slot #f) => e->e]
+      [(hash-table-get (slot-ref obj '%slots) slot #f) => identity]
       [else (next-method)])
     (begin  ;set
       (hash-table-put! (slot-ref obj '%slots) slot (car value))
@@ -571,25 +569,25 @@
       [(_ (symbol args ...) _ ...) ;; lambda -> function
        (set-unit-name (symbol->string symbol) config unit)
        (set-unit-type type-fn config unit) 
-       (analyze-args args e->e config unit)]
+       (analyze-args args identity config unit)]
 
       [(_ symbol exp ...) 
        (if (pair? symbol)
          (begin
            (set-unit-name (symbol->string (car symbol)) config unit)
            (set-unit-type type-fn config unit)
-           (analyze-args (cdr symbol) e->e config unit))
+           (analyze-args (cdr symbol) identity config unit))
          (begin 
            (set-unit-name (symbol->string symbol) config unit)
            (match exp 
              [(or ('lambda (args ...) _ ...) ;; lambda -> function
                 ('^ (args ...) _ ...))
               (set-unit-type type-fn config unit)
-              (analyze-args args e->e config unit)]
+              (analyze-args args identity config unit)]
              [(or ('lambda arg _ ...) ;; lambda -> function
                 ('^ arg _ ...))
               (set-unit-type type-fn config unit)
-              (analyze-args (list :rest arg) e->e config unit)]
+              (analyze-args (list :rest arg) identity config unit)]
              [else (set-unit-type (if constant? type-const type-var) config unit)])))];; other -> var or constant
       [(_) #f])))
 
@@ -602,7 +600,7 @@
   (set-unit-type type-method config unit)
   (if (null? (caddr l))
     #f);TODO warning
-  (analyze-args (caddr l) e->e config unit))
+  (analyze-args (caddr l) identity config unit))
 
 
 (define (convert-type type)
@@ -610,7 +608,7 @@
                 (<void> . "#<undefined>")
                 )])
     (cond
-      [(assq-ref conv type #f) => e->e]
+      [(assq-ref conv type #f) => identity]
       [else (symbol->string type)])))
 
 
@@ -681,7 +679,7 @@
     (slot-set! unit 'supers (map
                               (lambda (x)
                                 (cond
-                                  [(to-class classes x) => e->e]
+                                  [(to-class classes x) => identity]
                                   [else (raise (condition
                                                  (<geninfo-warning> (message "super class is not found"))))]))
                               (reverse supers)))
@@ -810,7 +808,7 @@
 (define (geninfo-from-file path no-cache)
   (let ([abs-path (to-abs-path path)])
     (cond
-      [(and (not no-cache) (hash-table-get docs abs-path #f)) => e->e]
+      [(and (not no-cache) (hash-table-get docs abs-path #f)) => identity]
       [else (let ([doc (read-all-doc abs-path)])
               (if (not no-cache)
                 (hash-table-put! docs abs-path doc))
