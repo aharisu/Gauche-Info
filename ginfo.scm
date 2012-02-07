@@ -38,7 +38,8 @@
    ))
 
 (define (add-unit doc config unit)
-  (slot-set! doc 'units (cons unit (slot-ref doc 'units)))
+  (when unit
+    (slot-set! doc 'units (cons unit (slot-ref doc 'units))))
   unit)
 
 (define (commit-doc doc)
@@ -508,9 +509,10 @@
       [else (reverse (append
                        (list (cdr args) (string->symbol ".") (car args))
                        c))]))
-  (if (null? args)
-    args
-    (c->l args '())))
+  (cond
+    [(null? args) args]
+    [(symbol? args) (list '|.| args)]
+    [else (c->l args  '())]))
 
 
 ;;仮引数部をマッチングしながら再帰的に解析する
@@ -570,7 +572,7 @@
        (set-unit-type type-fn config unit) 
        (analyze-args args e->e config unit)]
 
-      [(_ symbol exp) 
+      [(_ symbol exp ...) 
        (if (pair? symbol)
          (begin
            (set-unit-name (symbol->string (car symbol)) config unit)
@@ -588,11 +590,6 @@
               (set-unit-type type-fn config unit)
               (analyze-args (list :rest arg) e->e config unit)]
              [else (set-unit-type (if constant? type-const type-var) config unit)])))];; other -> var or constant
-
-      [(_ symbol) ;; other -> var or constant
-       (set-unit-name (symbol->string symbol) config unit)
-       (set-unit-type (if constant? type-const type-var) config unit)]
-
       [(_) #f])))
 
 ;;define-methodの解析を行う
@@ -710,10 +707,12 @@
 
 ;;式が解析可能であればドキュメントに含める
 (define (parse-expression config unit)
-  (let ([exp (read)])
-    (unless (get-config config 'skip-relative) 
-      (if (analyzable? exp)
-        ((assq-ref  analyzable-symbols (car exp)) exp config unit))))
+  (guard (exc
+           ((<read-error> exc)))
+    (let ([exp (read)])
+      (unless (get-config config 'skip-relative) 
+        (if (analyzable? exp)
+          ((assq-ref  analyzable-symbols (car exp)) exp config unit)))))
   unit)
 
 ;;解析しようとしているファイルが.stubであれば事前解析を行う
