@@ -135,14 +135,22 @@
    (return :init-value '())
    ))
 
+(define (param-name param)
+  (car param))
+(define (param-acceptable param)
+  (cadr param))
+(define (param-description param)
+  (caddr param))
+
 (define-method commit ((unit <unit-proc>) original)
   (next-method)
   (slot-set! unit 'description (reverse (slot-ref original 'description)))
   (slot-set! unit 'return (reverse (slot-ref original 'return)))
-  ;;この時点で(hidden new (text1 text2 ...))のリスト構造から(new (text1 text2 ...))のリスト構造に修正する
+  ;;この時点で(hidden new (accept1 accept2 ...) (text1 text2 ...))のリスト構造から
+  ;;(new (accept1 accept2 ...) (text1 text2 ...))のリスト構造に修正する
   ;;hiddenとnewは自動解析結果の引数名を手動で修正するためにある
   (slot-set! unit 'param (map 
-                           (lambda (p)(list (cadr p) (reverse (caddr p))))
+                           (lambda (p)(list (cadr p) (reverse (caddr p)) (reverse (cadddr p))))
                            (reverse (slot-ref original 'param))))
   unit)
 
@@ -300,24 +308,73 @@
             tag-init
             (tag-append-text 'description))
 
+(define (process-acceptable-input text config unit)
+  (case (slot-ref unit 'state)
+    [(0) 
+     (let1 text (string-trim text)
+       (if (string-null? text)
+         #f
+         (if (and (<= 2 (string-length text))
+               (string=? "{@" (substring text 0 2)))
+           (begin
+             (slot-set! unit 'state 1)
+             (process-acceptable-input (substring text 2 (string-length text)) config unit))
+           (begin
+             (slot-set! unit 'state 2)
+             (process-acceptable-input text config unit)))))]
+    [(1) 
+     (let1 texts (string-split (string-trim-both text) #[\s])
+       (let loop ([texts texts])
+         (let* ([token (car texts)]
+                [found (string-scan token #\})])
+           (if found
+             ;;finish
+             (let1 before (substring token 0 found)
+               (unless (string-null? before)
+                 (slot-update! unit 'param
+                               (lambda (value)
+                                 (set-car! (cddr (car value))
+                                           (cons before (caddr (car value))))
+                                 value)))
+               (slot-set! unit 'state 2)
+               (process-acceptable-input (string-trim (string-scan text #\} 'after))
+                                         config unit))
+             ;;add acceptable
+             (let1 token (string-trim-both token)
+               (unless (string-null? token)
+                 (slot-update! unit 'param
+                               (lambda (value)
+                                 (set-car! (cddr (car value))
+                                           (cons token (caddr (car value))))
+                                 value)))
+               (if (null? (cdr texts))
+                 #f
+                 (loop (cdr texts))))))))]
+    [(2)  text]))
+
 ;;define @param tag
 (define-tag param
             tag-allow-multiple-ret-true
             (lambda (first-line config unit)
+              (slot-set! unit 'state 0)
               (cond
                 [(split-first-token first-line) 
                  => (lambda (tokens)
-                      (slot-update! unit 'param (lambda (v)
-                                                  (cons 
-                                                      (list (car tokens) (cadr tokens) '())
-                                                      v)))
+                      (slot-update! unit 'param 
+                                    (lambda (v)
+                                      (cons 
+                                        (list (car tokens) (cadr tokens) '() '())
+                                        v)))
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "param name is required"))))]))
             (lambda (text config unit)
-              (slot-update! unit 'param 
-                            (lambda (value)
-                              (set-car! (cddr (car value)) (cons text (caddr (car value))))
-                              value))))
+              (cond
+                [(process-acceptable-input text config unit) 
+                 => (lambda (text)
+                      (slot-update! unit 'param 
+                                    (lambda (value)
+                                      (set-car! (cdddr (car value)) (cons text (cadddr (car value))))
+                                      value)))])))
 
 ;;define @return tag
 (define-tag return
@@ -517,7 +574,7 @@
 
 ;;仮引数部をマッチングしながら再帰的に解析する
 (define (parse-each-arg args func-get-var config)
-  (let ([unit (make <unit-proc>)]
+  (let ([unit (make <unit-bottom>)]
         [init (get-init 'param)])
     (let loop ([args (cell->list args)])
       (match args
@@ -888,7 +945,7 @@
       (for-each
         (lambda (p) 
           (unless (null? (cadr p))
-            (format #t "- param##~a :\n    ~a\n" (car p) (string-join (cadr p) "\n    " ))))
+            (format #t "- param##~a :\n    ~a\n" (car p) (string-join (caddr p) "\n    " ))))
         (slot-ref unit 'param))))
   (unless (null? (ref unit 'return))
     (format #t "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
