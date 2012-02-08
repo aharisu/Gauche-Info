@@ -79,7 +79,8 @@
 (define-method slot-missing ((class <unit-bottom-meta>) obj slot . value)
   (if (null? value)
     (cond ;get
-      [(hash-table-get (slot-ref obj '%slots) slot #f) => identity]
+      [(hash-table-exists? (slot-ref obj '%slots) slot)
+       (hash-table-get (slot-ref obj '%slots) slot)]
       [else (next-method)])
     (begin  ;set
       (hash-table-put! (slot-ref obj '%slots) slot (car value))
