@@ -181,7 +181,7 @@
   (next-method)
   (slot-set! unit 'supers (reverse (slot-ref original 'supers)))
   (slot-set! unit 'slots (map
-                           (lambda (s) (list (car s) (reverse (cadr s))))
+                           (lambda (s) (list (car s) (reverse (cadr s)) (reverse (caddr s))))
                            (slot-ref original 'slots)))
   unit)
 
@@ -387,17 +387,21 @@
 (define-tag slot
             tag-allow-multiple-ret-true
             (lambda (first-line config unit)
+              (slot-set! unit 'state 0)
               (cond
                 [(split-first-token first-line)
                  => (lambda (tokens)
-                      (slot-update! unit 'slots (lambda (v) (cons (list (car tokens) '()) v)))
+                      (slot-update! unit 'slots (lambda (v) (cons (list (car tokens) '() '()) v)))
                       (caddr tokens))]
                 [else (raise (condition (<geninfo-warning> (message "slot name is required"))))]))
             (lambda (text config unit)
-              (slot-update! unit 'slots
-                            (lambda (v)
-                              (set-car! (cdr (car v)) (cons text (cadr (car v))))
-                              v))))
+              (cond 
+                [(process-acceptable-input text config unit)
+                 => (lambda (text) 
+                      (slot-update! unit 'slots
+                                    (lambda (v)
+                                      (set-car! (cddr (car v)) (cons text (caddr (car v))))
+                                      v)))])))
 
 ;;define @supers tag
 (define-tag supers
@@ -702,6 +706,7 @@
         [gen-slots (map 
                      (lambda (s)
                        (list (symbol->string (car s))
+                             '()
                              '()))
                      slots)])
     (for-each
@@ -958,8 +963,8 @@
   (for-each
     (lambda (s)
       (format #t "  slot        : ~a\n" (car s))
-      (unless (null? (cadr s))
-        (format #t "    ~a\n" (string-join (cadr s) "\n    "))))
+      (unless (null? (caddr s))
+        (format #t "    ~a\n" (string-join (caddr s) "\n    "))))
     (slot-ref unit 'slots))
   )
 
