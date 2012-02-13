@@ -292,7 +292,11 @@
 (define (split-first-token line)
   (let ([port (open-input-string line)])
     (if (zero? (string-length (string-trim (next-token-of '(#\space #\tab #\.) port))))
-      (let ([first (read port)])
+      (let ([first (guard (e
+                            [(<read-error> e) 
+                             (raise (condition
+                                      (<geninfo-warning> (message (format #f "name syntax error. [%s]" line)))))])
+                     (read port))])
         (if (eof-object? first)
           #f
           (append (match first
