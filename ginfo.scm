@@ -793,7 +793,7 @@
 
 ;;解析可能な式か?
 (define (analyzable? exp)
-  (if (list? exp)
+  (if (and (pair? exp) (list? exp))
     (boolean (assq (car exp) analyzable-symbols))
     #f))
 
