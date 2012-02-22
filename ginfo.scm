@@ -742,7 +742,8 @@
           [(assoc (car s) gen-slots)
            => (lambda (slot) 
                 (set-car! (cdr slot) (cadr s))
-                (set-car! (cddr slot) (caddr s)))]
+                (set-car! (cddr slot) (caddr s))
+                (set-car! (cdddr slot) (cadddr s)))]
           [else (print "analyze-slots warning. " (car s))]))
       org-slots)
     gen-slots))
@@ -861,8 +862,19 @@
 (define (get-config config slot)
   (hash-table-get config slot #f))
 
-;;一行分ファイルポインタを元に戻す
-(define-constant newline-size (string-size "\n"))
+(define newline-size 0)
+(define (init-newline-size)
+  (let loop ([c (read-char)])
+    (cond
+      [(eq? #\lf c) (set! newline-size 1)]
+      [(eq? #\cr c) 
+       (if (eq? (read-char) #\lf)
+         (set! newline-size 2)
+         (set! newline-size 1))]
+      [(eof-object? c) (set! newline-size 1)]
+      [else (loop (read-char))]))
+  (port-seek (current-input-port) 0))
+
 (define (restore-fp-with-line line)
   (port-seek (current-input-port) (- (+ (string-size line) 
                                         newline-size)) SEEK_CUR))
@@ -879,6 +891,7 @@
     (with-input-from-file
       filename
       (lambda ()
+        (init-newline-size)
         (when (string=? (path-extension filename) "stub")
           (pre-parse-stub config))
         (port-for-each
