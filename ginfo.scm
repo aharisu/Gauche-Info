@@ -887,13 +887,14 @@
     #f
     unit))
 
-(define (read-all-doc filename)
+(define (read-all-doc-from-port port :optional (stub? #f))
   (let ([doc (make <doc>)]
         [config (make-hash-table)]
         [cur-unit (make <unit-bottom>)])
     (with-input-from-file
       filename
       (lambda ()
+        (init-newline-size)
         (when (string=? (path-extension filename) "stub")
           (pre-parse-stub config))
         (port-for-each
@@ -917,7 +918,15 @@
             ))
           read-line)))
     (commit-doc doc)))
+                          
 
+(define (read-all-doc-from-file filename)
+  (let1 port (open-input-file filename)
+    (unwind-protect
+      (read-all-doc-from-port 
+        port 
+        (string=? (path-extension filename) "stub"))
+      (close-input-port port))))
 
 ;-------***************-----------
 ;;Entry point
@@ -935,7 +944,7 @@
   (let ([abs-path (to-abs-path path)])
     (cond
       [(and (not no-cache) (hash-table-get docs abs-path #f)) => identity]
-      [else (let ([doc (read-all-doc abs-path)])
+      [else (let ([doc (read-all-doc-from-file abs-path)])
               (if (not no-cache)
                 (hash-table-put! docs abs-path doc))
               doc)])))
@@ -970,6 +979,12 @@
               [else #f]); TODO warging
     (when doc
       (slot-set! doc 'name from))
+    doc))
+
+(define (geninfo-from-text text name)
+  (let1 doc (read-all-doc-from-port (open-input-string text))
+    (when doc
+      (slot-set! doc 'name name))
     doc))
 
 
