@@ -6,11 +6,12 @@
   (use util.match)
   (use file.util)
   (use text.parse)
-  (use gauche.interactive)
-  ;(export <doc> <geninfo-warning>
-  ;				<unit-top>
-  ;				api geninfo)
-  (export-all))
+  #;(export <doc> <geninfo-warning> <convert-context>
+    <unit-top> <unit-proc> <unit-var> <unit-class>
+    unit-bottom-initializer-add! slot-update!
+    api geninfo)
+  (export-all)
+  )
 
 (select-module ginfo)
 
@@ -29,6 +30,7 @@
    ))
 
 
+;;;;;
 ;;一つのドキュメントを表すクラス
 (define-class <doc> ()
   (
@@ -45,8 +47,10 @@
   (slot-set! doc 'units (reverse (slot-ref doc 'units)))
   doc)
 
-
+;;;;;
 ;;全てのドキュメントユニットの上位クラス
+;; @slot name slot name
+;; @slot type type name
 (define-class <unit-top> ()
   (
    (cur-tag :init-value 'description)
@@ -87,7 +91,9 @@
       (slot-set! obj 'initial-state? #f)
       (undefined))))
 
+;;;;;
 ;;スロットに対する更新関数
+;;ユニットオブジェクトのスロットに対する更新はこの関数を利用する
 (define (slot-update! obj slot f)
   (cond
     [(find (lambda (s) (eq? (car s) slot)) (class-slots (class-of obj)))
@@ -105,6 +111,7 @@
    )
   :metaclass <unit-bottom-meta>)
 
+;;;;;
 ;;unit-bottom初期化用関数
 ;;unit-bottomの疑似スロットに対してmake時に初期化する必要があるものはこのタイミングで行う
 (define unit-bottom-initializer '())
@@ -127,7 +134,14 @@
            (not (slot-ref unit 'initial-state?))))
     #f))
 
+(define-method show ((unit <unit-bottom>))
+  (next-method)
+  (hash-table-for-each
+    (slot-ref unit '%slots)
+    (lambda (key value)
+      (print key ":" value))))
 
+;;;;;
 ;;functionやmethodタイプ用のunit
 (define-class <unit-proc> (<unit-top>)
   (
@@ -165,10 +179,12 @@
   (format #t "return: ~S\n" (slot-ref unit 'return)))
 
 
-;;varやconstantタイプ用のunit
+;;;;;
+;;var、constant、parameterタイプ用のunit
 (define-class <unit-var> (<unit-top>) () )
 
 
+;;;;;
 ;;classタイプ用のunit
 (define-class <unit-class> (<unit-top>)
   (
@@ -197,9 +213,10 @@
 
 
 
-;;unit-bottomからtypeにあったunitクラスに変換する
 (define-macro (or-equal? x . any)
   `(or ,@(map (lambda (y) `(equal? ,x ,y)) any)))
+;;unit-bottomからtypeにあったunitクラスに変換する
+;;TODO この関数を外側からも拡張可能にする
 (define (spcify-unit type unit)
   (commit (cond
             [(or-equal? type type-fn type-method) (make <unit-proc> unit)]
@@ -798,7 +815,8 @@
     (boolean (assq (car exp) analyzable-symbols))
     #f))
 
-;;式が解析可能であればドキュメントに含める
+;;ドキュメントの直下にある式が定義であれば
+;;ドキュメントと関連するものとして解析を行う
 (define (parse-expression config unit)
   (guard (exc
            ((<read-error> exc)))
@@ -849,7 +867,6 @@
 (define (doc-start-line? line)
   (boolean (rxmatch #/^\s*\;\;\;\;\;(?!;)/ line)))
 
-;;行に式が含まれているか？
 (define (exp-start-line? line)
   (not (or (zero? (string-length (string-trim line)))
          (rxmatch #/^\s*(?:\|#)?\s*(?:;|#\||#;).*/ line))))
