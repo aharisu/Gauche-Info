@@ -57,12 +57,21 @@
    (description :init-value '())
    ))
 
+(define (reverse-and-escape-character l)
+  (let loop ([t l]
+             [acc '()])
+    (if (null? t)
+      acc
+      (loop (cdr t) (cons (escape-special-character (car t))
+                          acc)))))
+
+
 ;;<unit-bottom>の各スロットから値をコピーする
 ;;これ以降unitを編集することはない
 (define-method commit ((unit <unit-top>) original)
-  (slot-set! unit 'name (slot-ref original 'name))
-  (slot-set! unit 'type (slot-ref original 'type))
-  (slot-set! unit 'description (reverse (slot-ref original 'description)))
+  (slot-set! unit 'name (escape-special-character (slot-ref original 'name)))
+  (slot-set! unit 'type (escape-special-character (slot-ref original 'type)))
+  (slot-set! unit 'description (reverse-and-escape-character (slot-ref original 'description)))
   unit)
 
 (define-method show ((unit <unit-top>))
@@ -144,13 +153,15 @@
 
 (define-method commit ((unit <unit-proc>) original)
   (next-method)
-  (slot-set! unit 'description (reverse (slot-ref original 'description)))
-  (slot-set! unit 'return (reverse (slot-ref original 'return)))
+  ;(slot-set! unit 'description (reverse (slot-ref original 'description)))
+  (slot-set! unit 'return (reverse-and-escape-character (slot-ref original 'return)))
   ;;この時点で(hidden new (accept1 accept2 ...) (text1 text2 ...))のリスト構造から
   ;;(new (accept1 accept2 ...) (text1 text2 ...))のリスト構造に修正する
   ;;hiddenとnewは自動解析結果の引数名を手動で修正するためにある
   (slot-set! unit 'param (map 
-                           (lambda (p)(list (cadr p) (reverse (caddr p)) (reverse (cadddr p))))
+                           (lambda (p)(list (escape-special-character (cadr p))
+                                            (reverse-and-escape-character (caddr p))
+                                            (reverse-and-escape-character (cadddr p))))
                            (reverse (slot-ref original 'param))))
   unit)
 
@@ -179,10 +190,12 @@
 
 (define-method commit ((unit <unit-class>) original)
   (next-method)
-  (slot-set! unit 'supers (reverse (slot-ref original 'supers)))
+  (slot-set! unit 'supers (reverse-and-escape-character (slot-ref original 'supers)))
   (slot-set! unit 'slots (map
-                           (lambda (s) (list (car s) (reverse (caddr s)) (reverse (cadddr s))))
-                           (slot-ref original 'slots)))
+                           (lambda (s) (list (escape-special-character (car s))
+                                             (reverse-and-escape-character (caddr s))
+                                             (reverse-and-escape-character (cadddr s))))
+                           (reverse (slot-ref original 'slots))))
   unit)
 
 (unit-bottom-initializer-add!
@@ -555,6 +568,8 @@
                        (<geninfo-warning> (message #`"unkwon tag name [,tag]."))))]))
     text))
 
+(define (escape-special-character text)
+  (regexp-replace-all #/"/ text "\\\\\""))
 ;;テキストを現在のタグ内に追加する
 (define (process-text text config unit)
   (if (not (string-null? text))
