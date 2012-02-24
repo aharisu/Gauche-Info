@@ -830,16 +830,27 @@
     (boolean (assq (car exp) analyzable-symbols))
     #f))
 
+(define (return-from-read-exception org-fp)
+  (port-seek (current-input-port) org-fp SEEK_SET)
+  ;;skip the first-line of the problem
+  (read-line)
+  (let loop ([line (read-line)])
+    (unless (eof-object? line) 
+      (if (or (exp-start-line? line) (doc-start-line? line))
+        (restore-fp-with-line line)
+        (loop (read-line))))))
+
+
 ;;ドキュメントの直下にある式が定義であれば
 ;;ドキュメントと関連するものとして解析を行う
 (define (parse-expression config unit)
-  (guard (exc
-           ((<read-error> exc)))
-    (let ([exp (read)])
-      (unless (get-config config 'skip-relative) 
-        (if (analyzable? exp)
-          ((assq-ref  analyzable-symbols (car exp)) exp config unit)))))
-  unit)
+  (let1 org-fp (port-seek (current-input-port) 0 SEEK_CUR)
+    (guard (exc ([<read-error> exc] (return-from-read-exception org-fp)))
+      (let ([exp (read)])
+        (unless (get-config config 'skip-relative) 
+          (if (analyzable? exp)
+            ((assq-ref  analyzable-symbols (car exp)) exp config unit)))))
+    unit))
 
 (define (put-class-c->scm config c-name scm-name)
   (let-values ([(classes new-create?) (cond
