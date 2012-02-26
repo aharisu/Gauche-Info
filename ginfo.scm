@@ -322,21 +322,23 @@
     (slot-update! unit tag (lambda (value) (cons text value)))))
 
 (define (split-first-token line)
-  (let ([port (open-input-string line)])
-    (if (zero? (string-length (string-trim (next-token-of '(#\space #\tab #\.) port))))
-      (let ([first (guard (e
-                            [(<read-error> e) 
-                             (raise (condition
-                                      (<geninfo-warning> (message (format #f "name syntax error. [%s]" line)))))])
-                     (read port))])
-        (if (eof-object? first)
-          #f
-          (append (match first
-                    [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
-                    [sym (list (x->writable-string sym) (x->writable-string sym))])
-                  (cons (string-trim (port->string port)) '()))))
+  (let1 m (rxmatch #/^\s*\.(?!\.)(.*)$/ line)
+    (if m
       ;;param name is "."
-      (list "." "." (string-trim (port->string port))))))
+      (list "." "." (string-trim (m 1)))
+      (let ([port (open-input-string line)])
+        (let ([first (guard (e
+                              [(<read-error> e) 
+                               (raise (condition
+                                        (<geninfo-warning> (message (format #f "name syntax error. [~s]" line)))))])
+                       (read port))])
+          (if (eof-object? first)
+            #f
+            (append (match first
+                      [(hidden '>> new) (list (x->writable-string hidden) (x->writable-string new))]
+                      [sym (list (x->writable-string sym) (x->writable-string sym))])
+                    (cons (string-trim (port->string port)) '()))))))))
+
 
 ;;define @description tag
 (define-tag description
