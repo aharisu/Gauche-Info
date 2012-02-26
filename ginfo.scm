@@ -277,19 +277,21 @@
 ;;parse document
 ;-------***************-----------
 (define (x->writable-string x)
-  (match x
-    [(? string? x) (string-append "\"" x "\"")]
-    ;[(symbol? x) (string-append "'" (symbol->string x))]
-    [(? keyword? x) (string-append ":" (keyword->string x))]
-    [('quote x) (string-append "'" (x->writable-string x))]
-    [(? list? x) (string-append "(" 
-                                (string-trim-right
-                                  (fold-right
-                                    (lambda (x acc) (string-append (x->writable-string x) " " acc))
-                                    ""
-                                    x))
-                                ")")]
-    [x (x->string x)]))
+  (if (and (pair? x) (not (list? x)))
+    (x->string (cell->list x)) ; dotted pair
+    (match x 
+      [(? string? x) (string-append "\"" x "\"")]
+      ;[(symbol? x) (string-append "'" (symbol->string x))]
+      [(? keyword? x) (string-append ":" (keyword->string x))]
+      [('quote x) (string-append "'" (x->writable-string x))]
+      [(? list? x) (string-append "(" 
+                                  (string-trim-right
+                                    (fold-right
+                                      (lambda (x acc) (string-append (x->writable-string x) " " acc))
+                                      ""
+                                      x))
+                                  ")")]
+      [else (x->string x)])))
 
 (define tags '())
 
@@ -1002,7 +1004,8 @@
     (unwind-protect
       (read-all-doc-from-port 
         port 
-        (string=? (path-extension filename) "stub"))
+        (let1 ext (path-extension filename)
+          (and ext (string=? ext "stub"))))
       (close-input-port port))))
 
 ;-------***************-----------
