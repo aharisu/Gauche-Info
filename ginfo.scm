@@ -889,13 +889,19 @@
 ;;read file
 ;-------***************-----------
 
+(define (block-comment-start-line? line)
+  (boolean (rxmatch #/^\s*#\|.*/ line)))
+
+(define (exp-comment-start-line? line)
+  (boolean (rxmatch #/^\s*#;.*/ line)))
+
 ;;ドキュメントの開始マーカーがあるか?
 (define (doc-start-line? line)
   (boolean (rxmatch #/^\s*\;\;\;\;\;(?!;)/ line)))
 
 (define (exp-start-line? line)
   (not (or (zero? (string-length (string-trim line)))
-         (rxmatch #/^\s*(?:\|#)?\s*(?:;|#\||#;).*/ line))))
+         (rxmatch #/^\s*;.*/ line))))
 
 ;;ドキュメント解析時の各種設定を設定
 (define (set-config config slot v)
@@ -922,6 +928,30 @@
   (port-seek (current-input-port) (- (+ (string-size line) 
                                         newline-size)) SEEK_CUR))
 
+(define (skip-block-comment)
+  (skip-while #[\s])
+  (read-char) ;;skip # char
+  (read-char) ;;skip | char
+  (let loop ([ch (read-char)]
+             [level 1])
+    (cond
+      [(and (eq? ch #\#) (eq? (peek-char) #\|))
+       (read-char) ;skip | char
+       (loop (read-char) (+ level 1))]
+      [(and (eq? ch #\|) (eq? (peek-char) #\#))
+       (read-char) ;skip # char
+       (if (zero? (- level 1))
+         #f;finish
+         (loop (read-char) (- level 1)))]
+      [else (loop (read-char) level)])))
+
+(define (skip-exp-comment)
+  (skip-while #[\s])
+  (read-char) ;;skip # char
+  (read-char) ;;skip ; char
+  (guard (e [else #f])
+    (read)))
+
 (define (cmd-type-unit? unit)
   (if (and (slot-ref unit 'type) (equal? (slot-ref unit 'type) type-cmd))
     #f
@@ -940,6 +970,13 @@
         (port-for-each
           (lambda (line)
             (cond
+              [(string-null? line) ]
+              [(block-comment-start-line? line)
+               (restore-fp-with-line line)
+               (skip-block-comment)]
+              [(exp-comment-start-line? line)
+               (restore-fp-with-line line)
+               (skip-exp-comment)]
               [(exp-start-line? line) 
                (restore-fp-with-line line)
                (let ([u (parse-expression config cur-unit)])
