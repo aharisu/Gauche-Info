@@ -1052,7 +1052,7 @@
 ;;ファイルを解析しドキュメントユニットを生成する
 ;; @param from シンボルであれば、モジュール名として扱われ現在のロードパスからファイルを検索して解析する
 ;;文字列であれば、ファイルへのパス名として扱われそのパスに存在するファイルを解析する
-(define (geninfo from :optional (no-cache #f))
+(define (geninfo from :optional (no-cache #t))
   (let1 doc (cond
               [(symbol? from) (geninfo-from-module from no-cache)]
               [(string? from) (geninfo-from-file from no-cache)]
