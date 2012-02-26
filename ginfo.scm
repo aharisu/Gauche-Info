@@ -9,7 +9,7 @@
   #;(export <doc> <geninfo-warning> <convert-context>
     <unit-top> <unit-proc> <unit-var> <unit-class>
     unit-bottom-initializer-add! slot-update!
-    api geninfo)
+    output geninfo)
   (export-all)
   )
 
@@ -1079,100 +1079,6 @@
                            (lambda (unit) (output out unit))
                            (slot-ref doc 'units)))))
 
-
-;-------***************-----------
-;API Out
-;-------***************-----------
-
-;;;;;
-;;ユニットのapi情報を標準出力に出力する
-;;api関数で検索したユニットを出力するために利用する
-(define-class <api-context> (<convert-context>) ())
-
-(define-method output ((context <api-context>) (unit <unit-top>))
-  (format #t "API are\n")
-  (format #t "  type        : ~a\n" (ref unit 'type))
-  (format #t "  name        : ~a\n" (ref unit 'name))
-  (unless (null? (ref unit 'description))
-    (format #t "  description : ~a\n" (string-join (ref unit 'description) "\n                ")))
-  )
-
-(define-method output ((context <api-context>) (unit <unit-proc>))
-  (next-method)
-  (unless (null? (ref unit 'param))
-    (begin
-      (format #t "  param       : ~a\n" (fold-right
-                                          (lambda (p acc) (string-append (car p) " " acc))
-                                          ""
-                                          (slot-ref unit 'param)))
-      (for-each
-        (lambda (p) 
-          (unless (null? (cadr p))
-            (format #t "- param##~a :\n    ~a\n" (car p) (string-join (caddr p) "\n    " ))))
-        (slot-ref unit 'param))))
-  (unless (null? (ref unit 'return))
-    (format #t "  return      : ~a\n" (string-join (ref unit 'return) "\n                ")))
-  )
-
-(define-method output ((context <api-context>) (unit <unit-class>))
-  (next-method)
-  (unless (null? (slot-ref unit 'supers))
-    (format #t "  supers      : ~a\n" (string-join (ref unit 'supers) " ")))
-  (for-each
-    (lambda (s)
-      (format #t "  slot        : ~a\n" (car s))
-      (unless (null? (caddr s))
-        (format #t "    ~a\n" (string-join (caddr s) "\n    "))))
-    (slot-ref unit 'slots))
-  )
-
-
-;;ドキュメントの中からnameがsymbolのユニットを探す
-(define (find-unit str-symbol doc)
-  (find (lambda (unit) (string=? str-symbol (ref unit 'name))) (ref doc 'units)))
-
-;;fromが指定してある場合はそのドキュメントの中から
-;;fromが指定していない場合は読み込み済みの全てのドキュメントの中から
-;;symbolと同じ名前を持つユニットを探す
-(define (find-doc-unit symbol from)
-  (if from
-    (find-unit symbol (geninfo from #f))
-    (call/cc (lambda (c)
-               (hash-table-for-each docs (lambda (name doc) (cond [(find-unit symbol doc) => c])))
-               #f))))
-
-;;現在読み込んでいるモジュールから調べたいシンボルを探し、
-;;見つかったモジュールのドキュメントを生成してユニットを返す
-(define (find-doc-unit-in-modules symbol)
-  (cond
-    [(call/cc (lambda (c)
-                (for-each 
-                  (lambda (m)
-                    (if (find 
-                          (lambda (s) (eq? s symbol))
-                          (hash-table-keys (module-table m)))
-                      (c m)))
-                  (all-modules))
-                #f))
-     => (lambda (m) (find-unit (x->string symbol) (geninfo-from-module (module-name m) #f)))]
-    [else #f]))
-
-(define (show-api unit)
-  (let ([context (make <api-context> :port (standard-output-port))])
-    (with-output-to-port (slot-ref context 'port)
-                         (lambda ()
-                           (output context unit)))))
-
-;;;;;
-;;symbolのドキュメントユニットを探し、api情報を出力する
-(define (api symbol :key from)
-  (guard (e
-           ;;TODO もうちょっとましな警告表示
-           [(<geninfo-warning> e) (format #t "~s\n" (slot-ref e 'message))])
-    (cond
-      [(find-doc-unit (x->string symbol) (if (undefined? from) #f from)) => show-api]
-      [(find-doc-unit-in-modules symbol) => show-api]
-      [else #f]))
-  (values))
+(define-generic output)
 
 
