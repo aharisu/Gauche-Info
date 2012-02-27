@@ -702,7 +702,7 @@
        (set-unit-type type-fn config unit) 
        (analyze-args args identity config unit)]
 
-      [(_ symbol exp ...) 
+      [(_ symbol exp) 
        (if (pair? symbol)
          (begin
            (set-unit-name (symbol->string (car symbol)) config unit)
