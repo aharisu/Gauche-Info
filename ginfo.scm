@@ -15,6 +15,11 @@
 
 (select-module ginfo)
 
+(define (guarded-read :optional (port (current-input-port)))
+  (guard (exc [(<read-error> exc) (guarded-read)])
+    (read port)))
+
+
 ;-------***************-----------
 ;data structure
 ;-------***************-----------
@@ -462,7 +467,10 @@
 (define-tag name
             (lambda (config unit) (not (slot-ref unit 'name)))
             (lambda (first-line config unit)
-              (let ([name (read (open-input-string first-line))])
+              (let ([name (guard (e [(<read-error> e) 
+                                     (raise (condition 
+                                              (<geninfo-warning> (message #`"could not parse name [,first-line]"))))])
+                            (read (open-input-string first-line)))])
                 (if (eof-object? name)
                   (raise (condition (<geninfo-warning> (message "@name tag required document unit name"))))
                   (slot-set! unit 'name (x->string name)))
@@ -496,7 +504,10 @@
 (define-tag type
             (lambda (config unit) (not (slot-ref unit 'type)))
             (lambda (first-line config unit)
-              (let ([type (read (open-input-string first-line))])
+              (let ([type (guard (e [(<read-error> e) 
+                                     (raise (condition 
+                                              (<geninfo-warning> (message #`"could not parse type name [,first-line]"))))])
+                            (read (open-input-string first-line)))])
                 (if (eof-object? type)
                   (raise (condition (<geninfo-warning> (message "@type tag required type name"))))
                   (let ([type (x->string type)])
@@ -516,7 +527,8 @@
 (define-tag @parse-relative
             tag-allow-multiple-ret-true
             (lambda (first-line config unit)
-              (let ([parse? (read (open-input-string first-line))])
+              (let ([parse? (guard (e [(<read-error> e) #t])
+                              (read (open-input-string first-line)))])
                 (if (or (eof-object? parse?) (not (boolean? parse?)))
                   (raise (condition (<geninfo-warning> (message "@parse-relative tag value selection is #t or #f"))))
                   (set-config config 'skip-relative (not parse?)))
@@ -884,7 +896,7 @@
                           e)])
             (if class
               (hash-table-put! classes class (symbol->string (cadr e)))))))
-      read)
+      guarded-read)
     (port-seek (current-input-port) 0)
     (set-config config 'stub-class classes)))
 
