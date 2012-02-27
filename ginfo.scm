@@ -379,7 +379,7 @@
                                       ""
                                       x))
                                   ")")]
-      [else (x->string x)])))
+      [_ (x->string x)])))
 
 (define tags '())
 
@@ -802,11 +802,11 @@
                 ('^ arg _ ...))
               (set-unit-type type config unit)
               (analyze-args (list :rest arg) identity config unit)]
-             [else (set-unit-type (cond
-                                    [(eq? type type-macro) type-macro]
-                                    [constant? type-const]
-                                    [else type-var])
-                                  config unit)])))];; other -> var or constant
+             [_ (set-unit-type (cond
+                                 [(eq? type type-macro) type-macro]
+                                 [constant? type-const]
+                                 [else type-var]) 
+                               config unit)])))];; other -> var or constant
       [(_) #f])))
 
 ;;stub用 parseing for define-enum
