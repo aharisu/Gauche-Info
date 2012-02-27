@@ -46,7 +46,7 @@
    (name :init-keyword :name)
    ))
 
-(define (add-unit doc config unit)
+(define (add-unit doc unit)
   (when unit
     (slot-set! doc 'units (cons unit (slot-ref doc 'units))))
   unit)
@@ -55,19 +55,57 @@
   (slot-set! doc 'units (reverse (slot-ref doc 'units)))
   doc)
 
+
+(define (keyword-replace keyword-list keyword replacer
+                         :optional add-value)
+  (guard (e [else (if (undefined? add-value)
+                    keyword-list
+                    (append keyword-list (list keyword add-value)))])
+    (let1 value (get-keyword keyword keyword-list)
+      (if replacer
+        (let loop ([l keyword-list]
+                   [acc '()])
+          (if (eq? (car l) keyword)
+            (append acc 
+                    (list (car l) (replacer value))
+                    (cddr l))
+            (loop (cddr l) (append acc
+                                   (list (car l) (cadr l))))))
+
+        keyword-list))))
+
+(define (description-constract description)
+  (if (string-null? description)
+    '()
+    (map
+      escape-special-character
+      (string-split description "\n"))))
+
 ;;;;;
 ;;全てのドキュメントユニットの上位クラス
 ;; @slot name slot name
 ;; @slot type type name
 (define-class <unit-top> ()
   (
+   ;; Do you need to have <unit-top>?
    (cur-tag :init-value 'description)
 
-   (name :init-value #f)
-   (type :init-value #f)
+   (name :init-keyword :name :init-value #f)
+   (type :init-keyword :type :init-value #f)
 
-   (description :init-value '())
+   (description :init-keyword :description :init-value '())
    ))
+
+(define-method initialize ((c <unit-top>) initargs)
+  (let* ([initargs (keyword-replace initargs :name escape-special-character)]
+         [initargs (keyword-replace initargs :description description-constract)])
+    (next-method c initargs)))
+
+(define (set-unit-name! unit name)
+  (slot-set! unit 'name (escape-special-character name)))
+
+(define (set-unit-description! unit description)
+  (slot-set! unit 'description (description-constract description)))
 
 (define (reverse-and-escape-character l)
   (let loop ([t l]
@@ -77,6 +115,11 @@
       (loop (cdr t) (cons (escape-special-character (car t))
                           acc)))))
 
+(define-macro (define-special-initialize class type . body)
+  `(define-method initialize ((c ,class) initargs)
+     (let ([initargs (keyword-replace initargs :type #f ,type)])
+       ,@body
+       (next-method c initargs))))
 
 ;;<unit-bottom>の各スロットから値をコピーする
 ;;これ以降unitを編集することはない
@@ -166,6 +209,24 @@
    (return :init-value '())
    ))
 
+(define-special-initialize <unit-proc> type-fn)
+
+(define (add-unit-param! unit name 
+                         :key (acceptable '())
+                         (description ""))
+  (slot-set! unit 'param
+             (append
+               (slot-ref unit 'param)
+               (cons
+                 (list
+                   (escape-special-character name)
+                   (map escape-special-character acceptable)
+                   (description-constract description))
+                 '()))))
+
+(define (set-unit-return! unit description)
+  (slot-set! unit 'return (description-constract)))
+
 (define (param-name param)
   (car param))
 (define (param-acceptable param)
@@ -202,6 +263,7 @@
 ;;var、constant、parameterタイプ用のunit
 (define-class <unit-var> (<unit-top>) () )
 
+(define-special-initialize <unit-var> type-var)
 
 ;;;;;
 ;;classタイプ用のunit
@@ -211,6 +273,24 @@
    (slots :init-value '())
    )
   )
+
+(define-special-initialize <unit-class> type-class)
+
+(define (add-unit-slot! unit name 
+                        :key (acceptable '())
+                        (description ""))
+  (slot-set! unit 'slots
+             (append
+               (slot-ref unit 'slots)
+               (cons
+                 (list
+                   (escape-special-character name)
+                   (map escape-special-character acceptable)
+                   (description-constract description))
+                 '()))))
+
+(define (set-unit-supers! unit supers)
+  (slot-set! unit 'supers (map escape-special-character supers)))
 
 (define-method commit ((unit <unit-class>) original)
   (next-method)
@@ -240,9 +320,9 @@
 ;;TODO この関数を外側からも拡張可能にする
 (define (spcify-unit type unit)
   (commit (cond
-            [(or-equal? type type-fn type-method type-macro) (make <unit-proc> unit)]
-            [(or-equal? type type-var type-const type-parameter) (make <unit-var> unit)]
-            [(or-equal? type type-class) (make <unit-class> unit)]
+            [(or-equal? type type-fn type-method type-macro) (make <unit-proc>)]
+            [(or-equal? type type-var type-const type-parameter) (make <unit-var>)]
+            [(or-equal? type type-class) (make <unit-class>)]
             [else (raise (condition (<geninfo-warning> (message "unkown document unit type"))))]) ;TODO warning
           unit))
 
@@ -1019,12 +1099,12 @@
                    (restore-fp-with-line line)
                    (let ([u (parse-expression config cur-unit)])
                      (unless (initial-state? u)
-                       (add-unit doc config (commit-unit config u))
+                       (add-unit doc (commit-unit config u))
                        (set! cur-unit (make <unit-bottom>))))]
                   [(doc-start-line? line) 
                    (restore-fp-with-line line)
                    (unless (initial-state? cur-unit)
-                     (add-unit doc config (commit-unit config cur-unit))
+                     (add-unit doc (commit-unit config cur-unit))
                      (set! cur-unit (make <unit-bottom>)))
                    (cond
                      [(cmd-type-unit? (parse-doc config cur-unit))
