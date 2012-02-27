@@ -929,8 +929,12 @@
   (port-seek (current-input-port) 0))
 
 (define (restore-fp-with-line line)
-  (port-seek (current-input-port) (- (+ (string-size line) 
-                                        newline-size)) SEEK_CUR))
+  (let1 ch (read-byte)
+    (port-seek (current-input-port) 
+             (- (+ (string-size line) 
+                   (if (eof-object? ch) 
+                     0 (+ 1 newline-size))))
+             SEEK_CUR)))
 
 (define (skip-block-comment)
   (skip-while #[\s])
@@ -1082,5 +1086,4 @@
                            (slot-ref doc 'units)))))
 
 (define-generic output)
-
 
