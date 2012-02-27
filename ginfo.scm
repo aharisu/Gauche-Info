@@ -6,6 +6,7 @@
   (use util.match)
   (use file.util)
   (use text.parse)
+  (use gauche.parameter)
   #;(export <doc> <geninfo-warning> <convert-context>
     <unit-top> <unit-proc> <unit-var> <unit-class>
     unit-bottom-initializer-add! slot-update!
@@ -14,6 +15,8 @@
   )
 
 (select-module ginfo)
+
+(define ignore-geninfo-warning? (make-parameter #f))
 
 (define (guarded-read :optional (port (current-input-port)))
   (guard (exc [(<read-error> exc) (guarded-read)])
@@ -977,51 +980,59 @@
     #f
     unit))
 
-(define (read-all-doc-from-port port :optional (stub? #f))
+(define (read-all-doc-from-port port ignore-warning? :optional (stub? #f))
   (let ([doc (make <doc>)]
         [config (make-hash-table)]
         [cur-unit (make <unit-bottom>)])
-    (with-input-from-port
-      port
-      (lambda ()
-        (init-newline-size)
-        (when stub?
-          (pre-parse-stub config))
-        (port-for-each
-          (lambda (line)
-            (cond
-              [(string-null? line) ]
-              [(block-comment-start-line? line)
-               (restore-fp-with-line line)
-               (skip-block-comment)]
-              [(exp-comment-start-line? line)
-               (restore-fp-with-line line)
-               (skip-exp-comment)]
-              [(exp-start-line? line) 
-               (restore-fp-with-line line)
-               (let ([u (parse-expression config cur-unit)])
-                 (unless (initial-state? u)
-                   (add-unit doc config (commit-unit config u))
-                   (set! cur-unit (make <unit-bottom>))))]
-              [(doc-start-line? line) 
-               (restore-fp-with-line line)
-               (unless (initial-state? cur-unit)
-                 (add-unit doc config (commit-unit config cur-unit))
-                 (set! cur-unit (make <unit-bottom>)))
-               (cond
-                 [(cmd-type-unit? (parse-doc config cur-unit))
-                  => (cut set! cur-unit <>)]
-                 [else (set! cur-unit (make <unit-bottom>))])]
-            ))
-          read-line)))
+    (parameterize ([ignore-geninfo-warning? ignore-warning?])
+      (with-input-from-port
+        port
+        (lambda ()
+          (init-newline-size)
+          (when stub?
+            (pre-parse-stub config))
+          (port-for-each
+            (lambda (line)
+              (guard (e [(<geninfo-warning> e)
+                         (if (ignore-geninfo-warning?)
+                           ;initialize the unit
+                           (set! cur-unit (make <unit-bottom>))
+                           ;raise geninfo-warning
+                           (raise e))])
+                (cond
+                  [(string-null? line) ]
+                  [(block-comment-start-line? line)
+                   (restore-fp-with-line line)
+                   (skip-block-comment)]
+                  [(exp-comment-start-line? line)
+                   (restore-fp-with-line line)
+                   (skip-exp-comment)]
+                  [(exp-start-line? line) 
+                   (restore-fp-with-line line)
+                   (let ([u (parse-expression config cur-unit)])
+                     (unless (initial-state? u)
+                       (add-unit doc config (commit-unit config u))
+                       (set! cur-unit (make <unit-bottom>))))]
+                  [(doc-start-line? line) 
+                   (restore-fp-with-line line)
+                   (unless (initial-state? cur-unit)
+                     (add-unit doc config (commit-unit config cur-unit))
+                     (set! cur-unit (make <unit-bottom>)))
+                   (cond
+                     [(cmd-type-unit? (parse-doc config cur-unit))
+                      => (cut set! cur-unit <>)]
+                     [else (set! cur-unit (make <unit-bottom>))])]
+                  )))
+            read-line))))
     (commit-doc doc)))
-                          
 
-(define (read-all-doc-from-file filename)
+
+(define (read-all-doc-from-file filename ignore-warning?)
   (let1 port (open-input-file filename)
     (unwind-protect
       (read-all-doc-from-port 
         port 
+        ignore-warning?
         (let1 ext (path-extension filename)
           (and ext (string=? ext "stub"))))
       (close-input-port port))))
@@ -1038,11 +1049,11 @@
     path
     (build-path (current-directory) path)))
 
-(define (geninfo-from-file path no-cache)
+(define (geninfo-from-file path no-cache ignore-warning?)
   (let ([abs-path (to-abs-path path)])
     (cond
       [(and (not no-cache) (hash-table-get docs abs-path #f)) => identity]
-      [else (let ([doc (read-all-doc-from-file abs-path)])
+      [else (let ([doc (read-all-doc-from-file abs-path ignore-warning?)])
               (if (not no-cache)
                 (hash-table-put! docs abs-path doc))
               doc)])))
@@ -1051,12 +1062,12 @@
   (eval `(require ,(module-name->path module)) 'gauche)
   (module-exports (find-module module)))
 
-(define (geninfo-from-module symbol no-cache)
+(define (geninfo-from-module symbol no-cache ignore-warning?)
   (let ([path (library-fold symbol (lambda (l p acc) (cons p acc)) '())])
     (if (null? path)
       (raise (condition
                (<geninfo-warning> (message "module not found"))))
-      (let ([doc (geninfo-from-file (car path) no-cache)]
+      (let ([doc (geninfo-from-file (car path) no-cache ignore-warning?)]
             [exports (get-module-exports symbol)])
         (if (boolean? exports)
           doc
@@ -1070,17 +1081,17 @@
 ;;ファイルを解析しドキュメントユニットを生成する
 ;; @param from シンボルであれば、モジュール名として扱われ現在のロードパスからファイルを検索して解析する
 ;;文字列であれば、ファイルへのパス名として扱われそのパスに存在するファイルを解析する
-(define (geninfo from :optional (no-cache #t))
+(define (geninfo from :key (no-cache #t) (ignore-warning? (ignore-geninfo-warning?)))
   (let1 doc (cond
-              [(symbol? from) (geninfo-from-module from no-cache)]
-              [(string? from) (geninfo-from-file from no-cache)]
+              [(symbol? from) (geninfo-from-module from no-cache ignore-warning?)]
+              [(string? from) (geninfo-from-file from no-cache ignore-warning?)]
               [else #f]); TODO warging
     (when doc
       (slot-set! doc 'name from))
     doc))
 
-(define (geninfo-from-text text name)
-  (let1 doc (read-all-doc-from-port (open-input-string text))
+(define (geninfo-from-text text name :key (ignore-warning? (ignore-geninfo-warning?)))
+  (let1 doc (read-all-doc-from-port (open-input-string text) ignore-warning?)
     (when doc
       (slot-set! doc 'name name))
     doc))
