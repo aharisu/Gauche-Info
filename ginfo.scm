@@ -240,7 +240,7 @@
 ;;TODO この関数を外側からも拡張可能にする
 (define (spcify-unit type unit)
   (commit (cond
-            [(or-equal? type type-fn type-method) (make <unit-proc> unit)]
+            [(or-equal? type type-fn type-method type-macro) (make <unit-proc> unit)]
             [(or-equal? type type-var type-const type-parameter) (make <unit-var> unit)]
             [(or-equal? type type-class) (make <unit-class> unit)]
             [else (raise (condition (<geninfo-warning> (message "unkown document unit type"))))]) ;TODO warning
@@ -485,6 +485,7 @@
 (define-constant type-fn "Function")
 (define-constant type-var "var")
 (define-constant type-method "Method")
+(define-constant type-macro "Macro")
 (define-constant type-const "Constant")
 ;Parameterは自動解析無理なので指定したいのなら自分で書いてね
 (define-constant type-parameter "Parameter")
@@ -499,6 +500,7 @@
     ,type-fn
     ,type-var
     ,type-method
+    ,type-macro
     ,type-const
     ,type-parameter
     ,type-class
@@ -695,31 +697,36 @@
 
 ;;define, define-constantの解析を行う
 (define (analyze-normal-define l config unit)
-  (let ([constant? (eq? (car l) 'define-constant)])
+  (let ([constant? (eq? (car l) 'define-constant)]
+        [type (if (eq? (car l) 'define-macro) type-macro type-fn)])
     (match l
       [(_ (symbol args ...) _ ...) ;; lambda -> function
        (set-unit-name (symbol->string symbol) config unit)
-       (set-unit-type type-fn config unit) 
+       (set-unit-type type config unit) 
        (analyze-args args identity config unit)]
 
       [(_ symbol exp) 
        (if (pair? symbol)
          (begin
            (set-unit-name (symbol->string (car symbol)) config unit)
-           (set-unit-type type-fn config unit)
+           (set-unit-type type config unit)
            (analyze-args (cdr symbol) identity config unit))
          (begin 
            (set-unit-name (symbol->string symbol) config unit)
            (match exp 
              [(or ('lambda (args ...) _ ...) ;; lambda -> function
                 ('^ (args ...) _ ...))
-              (set-unit-type type-fn config unit)
+              (set-unit-type type config unit)
               (analyze-args args identity config unit)]
              [(or ('lambda arg _ ...) ;; lambda -> function
                 ('^ arg _ ...))
-              (set-unit-type type-fn config unit)
+              (set-unit-type type config unit)
               (analyze-args (list :rest arg) identity config unit)]
-             [else (set-unit-type (if constant? type-const type-var) config unit)])))];; other -> var or constant
+             [else (set-unit-type (cond
+                                    [(eq? type type-macro) type-macro]
+                                    [constant? type-const]
+                                    [else type-var])
+                                  config unit)])))];; other -> var or constant
       [(_) #f])))
 
 ;;stub用 parseing for define-enum
@@ -837,6 +844,7 @@
     (define . ,analyze-normal-define)
     (define-constant . ,analyze-normal-define)
     (define-method . ,analyze-method-define)
+    (define-macro . ,analyze-normal-define)
     (define-class . ,analyze-class-define)
     (define-cproc . ,analyze-stub-proc-define)
     (define-cclass . ,analyze-stub-class-define)
