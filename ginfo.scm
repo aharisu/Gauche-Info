@@ -814,15 +814,15 @@
        (set-unit-type type config unit) 
        (analyze-args args identity config unit)]
 
-      [(_ symbol exp) 
+      [(_ symbol first-exp exp ...) 
        (if (pair? symbol)
          (begin
            (set-unit-name (symbol->string (car symbol)) config unit)
            (set-unit-type type config unit)
            (analyze-args (cdr symbol) identity config unit))
-         (begin 
+         (begin
            (set-unit-name (symbol->string symbol) config unit)
-           (match exp 
+           (match first-exp
              [(or ('lambda (args ...) _ ...) ;; lambda -> function
                 ('^ (args ...) _ ...))
               (set-unit-type type config unit)
