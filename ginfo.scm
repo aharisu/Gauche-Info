@@ -239,7 +239,7 @@
                  '()))))
 
 (define (set-unit-return! unit description)
-  (slot-set! unit 'return (description-constract)))
+  (slot-set! unit 'return (description-constract description)))
 
 (define (param-name param)
   (car param))
