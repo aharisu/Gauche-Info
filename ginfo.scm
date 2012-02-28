@@ -1061,11 +1061,13 @@
   (port-seek (current-input-port) 0))
 
 (define (restore-fp-with-line line)
+  (port-seek (current-input-port) -1 SEEK_CUR)
   (let1 ch (read-byte)
     (port-seek (current-input-port) 
              (- (+ (string-size line) 
-                   (if (eof-object? ch) 
-                     0 (+ 1 newline-size))))
+                   (if (or (eq? 10 ch) ;0x0a #\lf
+                         (eq? 13 ch)) ;0x0d #\cr
+                     newline-size 0)))
              SEEK_CUR)))
 
 (define (skip-block-comment)
