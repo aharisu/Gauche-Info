@@ -1042,7 +1042,8 @@
       (let ([exp (read)])
         (unless (get-config config 'skip-relative) 
           (if (analyzable? exp)
-            ((assq-ref  analyzable-symbols (car exp)) exp config unit doc)))))
+            (guard (e [else #f]) ;error of automated analysis is ignored
+              ((assq-ref  analyzable-symbols (car exp)) exp config unit doc))))))
     unit))
 
 (define (put-class-c->scm config c-name scm-name)
