@@ -44,6 +44,7 @@
   (
    (units :init-keyword :units :init-value '())
    (name :init-keyword :name)
+   (extend :init-keyword :extend :init-value '())
    ))
 
 (define (add-unit doc unit)
@@ -51,8 +52,12 @@
     (slot-set! doc 'units (cons unit (slot-ref doc 'units))))
   unit)
 
+(define (add-extend! doc module)
+  (slot-set! doc 'extend (cons module (slot-ref doc 'extend))))
+
 (define (commit-doc doc)
   (slot-set! doc 'units (reverse (slot-ref doc 'units)))
+  (slot-set! doc 'extend (reverse (slot-ref doc 'extend)))
   doc)
 
 
@@ -979,6 +984,24 @@
          field))]
     [(_) #f]))
 
+(define (analyze-module-define l config unit doc)
+  (match l
+    [(_ (? (lambda (exp) 
+             (and (symbol? exp) (eq? exp (get-config config 'name))))
+           m) spec ...)
+     (for-each
+       (lambda (exp)
+         (match exp
+           [('extend module-name ...)
+            (for-each
+              (lambda (module)
+                (when (symbol? module)
+                  (add-extend! doc module)))
+              module-name)]
+           [_ #f]))
+       spec)]
+    [_ #f]))
+
 ;;解析可能な式のリスト
 (define-constant analyzable-symbols 
   `(
@@ -988,6 +1011,7 @@
     (define-macro . ,analyze-normal-define)
     (define-class . ,analyze-class-define)
     (define-condition-type . ,analyze-condition-class-define)
+    (define-module . ,analyze-module-define)
     (define-cproc . ,analyze-stub-proc-define)
     (define-cclass . ,analyze-stub-class-define)
     (define-enum . ,analyze-stub-define-enum)
@@ -1132,10 +1156,11 @@
     #f
     unit))
 
-(define (read-all-doc-from-port port ignore-warning? :optional (stub? #f))
+(define (read-all-doc-from-port port name ignore-warning? :optional (stub? #f))
   (let ([doc (make <doc>)]
         [config (make-hash-table)]
         [cur-unit (make <unit-bottom>)])
+    (set-config config 'name name)
     (parameterize ([ignore-geninfo-warning? ignore-warning?])
       (with-input-from-port
         port
@@ -1179,11 +1204,12 @@
     (commit-doc doc)))
 
 
-(define (read-all-doc-from-file filename ignore-warning?)
+(define (read-all-doc-from-file filename name ignore-warning?)
   (let1 port (open-input-file filename)
     (unwind-protect
       (read-all-doc-from-port 
         port 
+        name
         ignore-warning?
         (let1 ext (path-extension filename)
           (and ext (string=? ext "stub"))))
@@ -1201,11 +1227,11 @@
     path
     (build-path (current-directory) path)))
 
-(define (geninfo-from-file path no-cache ignore-warning?)
+(define (geninfo-from-file path name no-cache ignore-warning?)
   (let ([abs-path (to-abs-path path)])
     (cond
       [(and (not no-cache) (hash-table-get docs abs-path #f)) => identity]
-      [else (let ([doc (read-all-doc-from-file abs-path ignore-warning?)])
+      [else (let ([doc (read-all-doc-from-file abs-path name ignore-warning?)])
               (if (not no-cache)
                 (hash-table-put! docs abs-path doc))
               doc)])))
@@ -1219,7 +1245,7 @@
     (if (null? path)
       (raise (condition
                (<geninfo-warning> (message "module not found"))))
-      (let ([doc (geninfo-from-file (car path) no-cache ignore-warning?)]
+      (let ([doc (geninfo-from-file (car path) symbol no-cache ignore-warning?)]
             [exports (get-module-exports symbol)])
         (if (boolean? exports)
           doc
@@ -1227,7 +1253,8 @@
                                (lambda (u) 
                                  (let ([n (string->symbol (slot-ref u 'name))]) 
                                    (find (cut eq? <> n) exports)))
-                               (slot-ref doc 'units))))))))
+                               (slot-ref doc 'units))
+                :extend (slot-ref doc 'extend)))))))
 
 ;;;;;
 ;;ファイルを解析しドキュメントユニットを生成する
@@ -1236,14 +1263,14 @@
 (define (geninfo from :key (no-cache #t) (ignore-warning? (ignore-geninfo-warning?)))
   (let1 doc (cond
               [(symbol? from) (geninfo-from-module from no-cache ignore-warning?)]
-              [(string? from) (geninfo-from-file from no-cache ignore-warning?)]
+              [(string? from) (geninfo-from-file from from no-cache ignore-warning?)]
               [else #f]); TODO warging
     (when doc
       (slot-set! doc 'name from))
     doc))
 
 (define (geninfo-from-text text name :key (ignore-warning? (ignore-geninfo-warning?)))
-  (let1 doc (read-all-doc-from-port (open-input-string text) ignore-warning?)
+  (let1 doc (read-all-doc-from-port (open-input-string text) name ignore-warning?)
     (when doc
       (slot-set! doc 'name name))
     doc))
