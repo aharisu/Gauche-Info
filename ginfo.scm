@@ -211,9 +211,23 @@
 
 (define-special-initialize <unit-proc> type-fn)
 
-(define (add-unit-param! unit name 
-                         :key (acceptable '())
-                         (description ""))
+(define-method add-unit-param! ((unit <unit-bottom>) 
+                                name :key (acceptable '())
+                                (description ""))
+  (slot-set! unit 'param
+             (append
+               (slot-ref unit 'param)
+               (cons
+                 (list
+                   (escape-special-character name)
+                   (escape-special-character name)
+                   (map escape-special-character acceptable)
+                   (description-constract description))
+                 '()))))
+
+(define-method add-unit-param! ((unit <unit-proc>) 
+                                name :key (acceptable '())
+                                (description ""))
   (slot-set! unit 'param
              (append
                (slot-ref unit 'param)
@@ -276,8 +290,23 @@
 
 (define-special-initialize <unit-class> type-class)
 
-(define (add-unit-slot! unit name 
-                        :key (acceptable '())
+(define-method add-unit-slot! ((unit <unit-bottom>)
+                               name :key (acceptable '())
+                               (description ""))
+  (slot-set! unit 'slots
+             (append
+               (slot-ref unit 'slots)
+               (cons
+                 (list
+                   (escape-special-character name)
+                   (escape-special-character name)
+                   (map escape-special-character acceptable)
+                   (description-constract description))
+                 '()))))
+
+
+(define-method add-unit-slot! ((unit <unit-class>)
+                        name :key (acceptable '())
                         (description ""))
   (slot-set! unit 'slots
              (append
