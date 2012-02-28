@@ -805,7 +805,7 @@
 
 
 ;;define, define-constantの解析を行う
-(define (analyze-normal-define l config unit)
+(define (analyze-normal-define l config unit doc)
   (let ([constant? (eq? (car l) 'define-constant)]
         [type (if (eq? (car l) 'define-macro) type-macro type-fn)])
     (match l
@@ -839,7 +839,7 @@
       [(_) #f])))
 
 ;;stub用 parseing for define-enum
-(define (analyze-stub-define-enum l config unit)
+(define (analyze-stub-define-enum l config unit doc)
   (when (null? (cdr l))
     #f) ;TODO warning
   (set-unit-name (symbol->string (cadr l)) config unit)
@@ -848,7 +848,7 @@
 
 ;;define-methodの解析を行う
 ;;TODO エラー処理
-(define (analyze-method-define l config unit)
+(define (analyze-method-define l config unit doc)
   (if (null? (cdr l))
     #f);TODO warning
   (set-unit-name (symbol->string (cadr l)) config unit)
@@ -869,7 +869,7 @@
 
 ;;stub用 define-cprocの解析を行う
 ;;TODO エラー処理
-(define (analyze-stub-proc-define l config unit)
+(define (analyze-stub-proc-define l config unit doc)
   (set-unit-name (symbol->string (cadr l)) config unit)
   (set-unit-type type-fn config unit)
   (analyze-args (caddr l) 
@@ -917,14 +917,14 @@
 
 
 ;;defime-classの解析を行う
-(define (analyze-class-define l config unit)
+(define (analyze-class-define l config unit doc)
   (set-unit-name (symbol->string (cadr l)) config unit)
   (set-unit-type type-class config unit)
   (slot-set! unit 'supers (map x->string (reverse (caddr l))))
   (slot-set! unit 'slots (analyze-slots (cadddr l) unit)))
 
 ;;stub用 define-cclassの解析を行う
-(define (analyze-stub-class-define l config unit)
+(define (analyze-stub-class-define l config unit doc)
   (define (to-class hash class)
     (if hash 
       (hash-table-get hash class #f)
@@ -946,6 +946,38 @@
     (slot-set! unit 'slots (analyze-slots slots unit))))
 
 
+(define (analyze-condition-class-define l config unit doc)
+  (match l
+    [(_ (? symbol? name) (? symbol? super) pred field ...)
+     (let1 name (symbol->string name) 
+       (set-unit-name name config unit)
+       (set-unit-type type-class config unit)
+       (slot-set! unit 'supers (cons (symbol->string super) '()))
+       (when (symbol? pred)
+         (let1 pred-unit (make <unit-proc> 
+                               :name (symbol->string pred)
+                               :description (string-append "type predicate for " name))
+           (add-unit-param! pred-unit "e")
+           (set-unit-return! pred-unit 
+                             (string-append
+                               "#t if an instance of " name
+                               ", otherwise #f."))
+           (add-unit doc pred-unit)))
+       (for-each
+         (lambda (spec)
+           (match spec
+             [((? symbol? slot)) 
+              (add-unit-slot! unit (symbol->string slot))]
+             [((? symbol? slot) (? symbol? accessor))
+              (add-unit-slot! unit (symbol->string slot))
+              (let1 unit (make <unit-proc>
+                               :name (symbol->string accessor)
+                               :description (string-append "slot accessoor for " name))
+                (add-unit-param! unit "e")
+                (add-unit doc unit))]
+           [_ #f]))
+         field))]
+    [(_) #f]))
 
 ;;解析可能な式のリスト
 (define-constant analyzable-symbols 
@@ -955,6 +987,7 @@
     (define-method . ,analyze-method-define)
     (define-macro . ,analyze-normal-define)
     (define-class . ,analyze-class-define)
+    (define-condition-type . ,analyze-condition-class-define)
     (define-cproc . ,analyze-stub-proc-define)
     (define-cclass . ,analyze-stub-class-define)
     (define-enum . ,analyze-stub-define-enum)
@@ -979,13 +1012,13 @@
 
 ;;ドキュメントの直下にある式が定義であれば
 ;;ドキュメントと関連するものとして解析を行う
-(define (parse-expression config unit)
+(define (parse-expression config unit doc)
   (let1 org-fp (port-seek (current-input-port) 0 SEEK_CUR)
     (guard (exc ([<read-error> exc] (return-from-read-exception org-fp)))
       (let ([exp (read)])
         (unless (get-config config 'skip-relative) 
           (if (analyzable? exp)
-            ((assq-ref  analyzable-symbols (car exp)) exp config unit)))))
+            ((assq-ref  analyzable-symbols (car exp)) exp config unit doc)))))
     unit))
 
 (define (put-class-c->scm config c-name scm-name)
@@ -1128,7 +1161,7 @@
                    (skip-exp-comment)]
                   [(exp-start-line? line) 
                    (restore-fp-with-line line)
-                   (let ([u (parse-expression config cur-unit)])
+                   (let ([u (parse-expression config cur-unit doc)])
                      (unless (initial-state? u)
                        (add-unit doc (commit-unit config u))
                        (set! cur-unit (make <unit-bottom>))))]
