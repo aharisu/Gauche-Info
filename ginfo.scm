@@ -1002,6 +1002,14 @@
        spec)]
     [_ #f]))
 
+(define (analyze-extend l config unit doc)
+  (unless (null? (cdr l))
+    (for-each
+      (lambda (module)
+        (when (symbol? module)
+          (add-extend! doc module)))
+      (cdr l))))
+
 ;;解析可能な式のリスト
 (define-constant analyzable-symbols 
   `(
@@ -1012,6 +1020,7 @@
     (define-class . ,analyze-class-define)
     (define-condition-type . ,analyze-condition-class-define)
     (define-module . ,analyze-module-define)
+    (extend . ,analyze-extend)
     (define-cproc . ,analyze-stub-proc-define)
     (define-cclass . ,analyze-stub-class-define)
     (define-enum . ,analyze-stub-define-enum)
