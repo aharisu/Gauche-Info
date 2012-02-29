@@ -1210,7 +1210,11 @@
                       => (cut set! cur-unit <>)]
                      [else (set! cur-unit (make <unit-bottom>))])]
                   )))
-            read-line))))
+            read-line)
+          (unless (initial-state? cur-unit)
+            (guard (e [(<geninfo-warning> e)
+                       (unless (ignore-geninfo-warning?) (raise e))])
+              (add-unit doc (commit-unit config cur-unit)))))))
     (commit-doc doc)))
 
 
